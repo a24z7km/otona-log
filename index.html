@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
 <style>
   :root{
     --bg:#F7F6F2;
@@ -75,6 +76,11 @@
   .cat-btn .tot{font-size:10.5px;color:var(--sub);font-variant-numeric:tabular-nums}
   .cat-btn.active{outline:2.5px solid var(--cat);outline-offset:-2.5px;background:color-mix(in srgb,var(--cat) 12%,#fff)}
   .cat-btn .dot{width:26px;height:4px;border-radius:2px;background:var(--cat);margin-top:2px}
+  .cat-btn.add{
+    color:var(--sub);border:1.5px dashed #D7D4CB;background:transparent;justify-content:center;
+  }
+  .cat-btn.add .emoji{font-size:25px;color:var(--sub);font-weight:700}
+  .cat-btn.add .nm{color:var(--sub)}
 
   /* ---- timeline ---- */
   .day-nav{display:flex;align-items:center;justify-content:space-between;margin:10px 2px 12px}
@@ -206,6 +212,7 @@ function save(){
 
 /* ---------------- utils ---------------- */
 function dayStart(t){ const d=new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
+function fmtYMD(t){ const d=new Date(t); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function fmtHM(t){ const d=new Date(t); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
 function fmtDur(ms){
   const m = Math.floor(ms/60000);
@@ -312,7 +319,12 @@ function renderRec(m){
           <span class="emoji">${c.emoji}</span><span class="nm">${esc(c.name)}</span>
           <span class="tot">${t?("今日 "+fmtDurShort(t)):"&nbsp;"}</span><span class="dot"></span>
         </button>`;
-      }).join("") + `</div>`;
+      }).join("") + `
+        <button class="cat-btn add" onclick="openCatEdit(null)">
+          <span class="emoji">＋</span><span class="nm">追加</span>
+          <span class="tot">&nbsp;</span><span class="dot" style="background:transparent"></span>
+        </button>
+      </div>`;
 
   if(cur){
     const upd=()=>{ const el=document.getElementById("elapsed");
@@ -474,6 +486,8 @@ function renderSet(m){
     <button class="btn ghost" onclick="openCatEdit(null)">＋ カテゴリを追加</button>
     <div class="sec-label">データ</div>
     <button class="btn ghost" onclick="exportJson()">JSONをエクスポート</button>
+    <button class="btn ghost" onclick="exportCsv()">CSVをエクスポート</button>
+    <button class="btn ghost" onclick="exportXlsx()">Excelをエクスポート</button>
     <button class="btn danger" onclick="clearAll()">全データを削除</button>
     <p style="font-size:11.5px;color:var(--sub);margin-top:14px">
       記録件数: ${state.entries.length} 件。データはこのアプリ内のストレージに保存されます。
@@ -519,7 +533,86 @@ function exportJson(){
   const blob = new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "otona-log-" + new Date().toISOString().slice(0,10) + ".json";
+  a.download = "otona-log-" + fmtYMD(Date.now()) + ".json";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+const EXPORT_HEADERS = ["日付","カテゴリ名","開始(HH:MM)","終了(HH:MM)","時間(分)","進行中フラグ"];
+function exportRows(){
+  const now = Date.now();
+  const rows = [];
+  for(const e of state.entries){
+    const realEnd = e.end===null ? now : e.end;
+    for(let day=dayStart(e.start); day<=dayStart(realEnd); day+=86400000){
+      const c = clipToDay({start:e.start,end:realEnd}, day);
+      if(!c) continue;
+      const [s,x] = c;
+      rows.push({
+        date:fmtYMD(day),
+        catId:e.cat,
+        catName:cat(e.cat).name,
+        start:fmtHM(s),
+        end:e.end===null && x===realEnd ? "" : fmtHM(x),
+        minutes:Math.round((x-s)/60000),
+        ongoing:e.end===null ? "TRUE" : "FALSE"
+      });
+    }
+  }
+  return rows.sort((a,b)=>a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
+}
+function csvCell(v){
+  const s = String(v ?? "");
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+}
+function exportCsv(){
+  const lines = [EXPORT_HEADERS, ...exportRows().map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing])]
+    .map(row=>row.map(csvCell).join(","));
+  downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-" + fmtYMD(Date.now()) + ".csv", "text/csv;charset=utf-8");
+}
+function exportXlsx(){
+  if(!window.XLSX?.utils){
+    toast("オフラインのためExcel出力できません。CSVをご利用ください");
+    return;
+  }
+  const rows = exportRows();
+  const listData = [EXPORT_HEADERS, ...rows.map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing])];
+  const summary = dailySummary(rows);
+  const wb = XLSX.utils.book_new();
+  const listWs = XLSX.utils.aoa_to_sheet(listData);
+  listWs["!cols"] = fitCols(listData);
+  XLSX.utils.book_append_sheet(wb, listWs, "記録一覧");
+
+  const sumWs = XLSX.utils.aoa_to_sheet(summary);
+  sumWs["!cols"] = fitCols(summary);
+  XLSX.utils.book_append_sheet(wb, sumWs, "日別集計");
+  XLSX.writeFile(wb, "otona-log-" + fmtYMD(Date.now()) + ".xlsx");
+}
+function dailySummary(rows){
+  const names = [];
+  const seen = new Set();
+  state.categories.forEach(c=>{
+    if(rows.some(r=>r.catId===c.id) && !seen.has(c.name)){ seen.add(c.name); names.push(c.name); }
+  });
+  rows.forEach(r=>{ if(!seen.has(r.catName)){ seen.add(r.catName); names.push(r.catName); } });
+  const byDay = new Map();
+  rows.forEach(r=>{
+    if(!byDay.has(r.date)) byDay.set(r.date, Object.fromEntries(names.map(n=>[n,0])));
+    const day = byDay.get(r.date);
+    day[r.catName] = (day[r.catName] || 0) + r.minutes;
+  });
+  return [["日付", ...names], ...[...byDay.keys()].sort().map(d=>[d, ...names.map(n=>byDay.get(d)[n] || 0)])];
+}
+function fitCols(data){
+  if(!data.length) return [];
+  return data[0].map((_,i)=>{
+    const max = data.reduce((m,row)=>Math.max(m, String(row[i] ?? "").length), 0);
+    return {wch:Math.min(Math.max(max + 2, 8), 32)};
+  });
+}
+function downloadBlob(content, filename, type){
+  const blob = new Blob([content],{type});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
   a.click(); URL.revokeObjectURL(a.href);
 }
 function clearAll(){
