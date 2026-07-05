@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>オトナログ</title>
+<meta name="theme-color" content="#3D4E81">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+  :root{
+    --bg:#F7F6F2;
+    --card:#FFFFFF;
+    --ink:#2B2B33;
+    --sub:#8A8A94;
+    --line:#E8E6DF;
+    --accent:#3D4E81;      /* 藍 */
+    --accent-soft:#EAEDF5;
+    --danger:#C0564F;
+    --radius:16px;
+    --c-sleep:#7C8DB5; --c-study:#5B9E8F; --c-work:#C98A5E; --c-class:#8B7BB5;
+    --c-move:#9AA65C; --c-meal:#D98F9C; --c-house:#6FA8C9; --c-ex:#D9A441;
+    --c-rest:#A8A29B; --c-read:#7BA37B;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    font-family:"Hiragino Maru Gothic ProN","BIZ UDGothic","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+    background:var(--bg); color:var(--ink); font-size:15px; line-height:1.6;
+  }
+  #app{max-width:480px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;position:relative}
+  header{padding:14px 18px 8px;display:flex;align-items:baseline;gap:8px}
+  header h1{font-size:19px;letter-spacing:.06em}
+  header .date{font-size:12.5px;color:var(--sub)}
+  main{flex:1;padding:0 14px 96px;overflow-y:auto}
+
+  /* ---- bottom tabs ---- */
+  nav{
+    position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+    width:100%;max-width:480px;background:var(--card);
+    border-top:1px solid var(--line);display:flex;
+    padding-bottom:env(safe-area-inset-bottom);z-index:20;
+  }
+  nav button{
+    flex:1;background:none;border:none;padding:10px 0 8px;cursor:pointer;
+    font-family:inherit;font-size:11px;color:var(--sub);display:flex;flex-direction:column;align-items:center;gap:2px;
+  }
+  nav button .ico{font-size:20px;line-height:1}
+  nav button.on{color:var(--accent);font-weight:700}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+  .sec-label{font-size:11.5px;color:var(--sub);letter-spacing:.12em;margin:14px 4px 8px}
+
+  /* ---- record ---- */
+  .now-card{background:var(--accent);color:#fff;border:none;text-align:center;padding:20px 16px}
+  .now-card.idle{background:var(--card);color:var(--sub);border:1px dashed var(--line)}
+  .now-card .nc-name{font-size:20px;font-weight:700;letter-spacing:.04em}
+  .now-card .nc-time{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.03em;margin:2px 0}
+  .now-card .nc-since{font-size:12px;opacity:.75}
+  .now-card .nc-stop{
+    margin-top:12px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.45);
+    color:#fff;border-radius:99px;padding:7px 26px;font-family:inherit;font-size:14px;cursor:pointer;
+  }
+  .cat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .cat-btn{
+    border:none;border-radius:var(--radius);padding:14px 6px 12px;cursor:pointer;font-family:inherit;
+    display:flex;flex-direction:column;align-items:center;gap:3px;background:var(--card);
+    border:1px solid var(--line);transition:transform .06s;
+  }
+  .cat-btn:active{transform:scale(.95)}
+  .cat-btn .emoji{font-size:24px;line-height:1.2}
+  .cat-btn .nm{font-size:13px;font-weight:600}
+  .cat-btn .tot{font-size:10.5px;color:var(--sub);font-variant-numeric:tabular-nums}
+  .cat-btn.active{outline:2.5px solid var(--cat);outline-offset:-2.5px;background:color-mix(in srgb,var(--cat) 12%,#fff)}
+  .cat-btn .dot{width:26px;height:4px;border-radius:2px;background:var(--cat);margin-top:2px}
+
+  /* ---- timeline ---- */
+  .day-nav{display:flex;align-items:center;justify-content:space-between;margin:10px 2px 12px}
+  .day-nav b{font-size:16px}
+  .day-nav button{background:var(--card);border:1px solid var(--line);border-radius:10px;width:38px;height:34px;font-size:16px;cursor:pointer;color:var(--ink)}
+  .tl-wrap{display:flex;gap:12px}
+  .tl-band{position:relative;width:64px;flex-shrink:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .tl-hour{position:absolute;left:0;right:0;border-top:1px solid #F0EEE8;font-size:8.5px;color:#C4C2BB;padding-left:3px}
+  .tl-blk{position:absolute;left:16px;right:4px;border-radius:4px;opacity:.92}
+  .tl-now{position:absolute;left:0;right:0;border-top:2px solid var(--danger)}
+  .tl-list{flex:1;min-width:0}
+  .tl-item{display:flex;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 12px;margin-bottom:8px;cursor:pointer}
+  .tl-item .bar{width:5px;align-self:stretch;border-radius:3px;flex-shrink:0}
+  .tl-item .ti-main{flex:1;min-width:0}
+  .tl-item .ti-name{font-size:14px;font-weight:600}
+  .tl-item .ti-time{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+  .tl-item .ti-dur{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent);flex-shrink:0}
+  .empty{color:var(--sub);text-align:center;padding:36px 0;font-size:13.5px}
+
+  /* ---- analysis ---- */
+  .seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:3px;margin:10px 0 14px}
+  .seg button{flex:1;border:none;background:none;border-radius:99px;padding:7px 0;font-family:inherit;font-size:13.5px;color:var(--sub);cursor:pointer}
+  .seg button.on{background:var(--accent);color:#fff;font-weight:700}
+  .stat-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .stat-row .sr-emoji{width:26px;text-align:center;font-size:17px;flex-shrink:0}
+  .stat-row .sr-body{flex:1;min-width:0}
+  .stat-row .sr-top{display:flex;justify-content:space-between;font-size:13px}
+  .stat-row .sr-top b{font-variant-numeric:tabular-nums}
+  .stat-row .sr-track{height:8px;background:#F0EEE8;border-radius:4px;margin-top:3px;overflow:hidden}
+  .stat-row .sr-fill{height:100%;border-radius:4px}
+  .week-chart{display:flex;gap:6px;align-items:flex-end;height:150px;margin-top:6px}
+  .wc-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+  .wc-stack{display:flex;flex-direction:column-reverse;border-radius:5px;overflow:hidden}
+  .wc-lbl{text-align:center;font-size:10.5px;color:var(--sub);margin-top:4px}
+  .kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+  .kpi .k-lbl{font-size:11px;color:var(--sub)}
+  .kpi .k-val{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
+
+  /* ---- settings ---- */
+  .set-item{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line)}
+  .set-item:last-child{border-bottom:none}
+  .set-item .se{font-size:19px;width:28px;text-align:center}
+  .set-item .sn{flex:1;font-size:14.5px}
+  .set-item .sc{width:16px;height:16px;border-radius:50%;flex-shrink:0}
+  .set-item button{background:none;border:none;color:var(--sub);font-size:16px;cursor:pointer;padding:4px 8px}
+  .btn{display:block;width:100%;background:var(--accent);color:#fff;border:none;border-radius:12px;padding:12px;font-family:inherit;font-size:14.5px;font-weight:700;cursor:pointer;margin-top:8px}
+  .btn.ghost{background:var(--card);color:var(--accent);border:1px solid var(--accent)}
+  .btn.danger{background:var(--card);color:var(--danger);border:1px solid var(--danger)}
+
+  /* ---- modal ---- */
+  .modal-bg{position:fixed;inset:0;background:rgba(30,30,40,.45);z-index:30;display:flex;align-items:flex-end;justify-content:center}
+  .modal{background:var(--card);border-radius:20px 20px 0 0;width:100%;max-width:480px;padding:20px 18px calc(20px + env(safe-area-inset-bottom))}
+  .modal h3{font-size:16px;margin-bottom:14px}
+  .fld{margin-bottom:12px}
+  .fld label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
+  .fld input,.fld select{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-family:inherit;font-size:15px;background:#fff;color:var(--ink)}
+  .fld-row{display:flex;gap:10px}
+  .fld-row .fld{flex:1}
+  .color-row{display:flex;gap:8px;flex-wrap:wrap}
+  .color-row .cbtn{width:34px;height:34px;border-radius:50%;border:3px solid transparent;cursor:pointer}
+  .color-row .cbtn.on{border-color:var(--ink)}
+  .modal-acts{display:flex;gap:10px;margin-top:16px}
+  .modal-acts .btn{margin-top:0}
+  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:13px;padding:9px 20px;border-radius:99px;z-index:40;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
+  .toast.show{opacity:1}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header><h1>オトナログ</h1><span class="date" id="hdrDate"></span></header>
+  <main id="main"></main>
+  <nav id="nav"></nav>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   オトナログ — 大人版ぴよログ プロトタイプ
+   データ構造:
+     state = {
+       categories:[{id,name,emoji,color}],
+       entries:[{id,cat,start,end}]  // end===null は進行中
+     }
+   ============================================================ */
+
+const STORAGE_KEY = "otona_log_v1";
+const PALETTE = ["#7C8DB5","#5B9E8F","#C98A5E","#8B7BB5","#9AA65C","#D98F9C","#6FA8C9","#D9A441","#A8A29B","#7BA37B","#B56A6A","#5E8CC9"];
+
+const DEFAULT_CATS = [
+  {id:"sleep", name:"睡眠",     emoji:"😴", color:"#7C8DB5"},
+  {id:"study", name:"研究・学習", emoji:"📚", color:"#5B9E8F"},
+  {id:"work",  name:"仕事",     emoji:"💼", color:"#C98A5E"},
+  {id:"class", name:"授業",     emoji:"🎓", color:"#8B7BB5"},
+  {id:"move",  name:"移動",     emoji:"🚃", color:"#9AA65C"},
+  {id:"meal",  name:"食事",     emoji:"🍚", color:"#D98F9C"},
+  {id:"house", name:"家事",     emoji:"🧺", color:"#6FA8C9"},
+  {id:"ex",    name:"運動",     emoji:"⚽", color:"#D9A441"},
+  {id:"rest",  name:"休憩",     emoji:"☕", color:"#A8A29B"},
+  {id:"read",  name:"読書",     emoji:"📖", color:"#7BA37B"},
+];
+
+let state = { categories: structuredClone(DEFAULT_CATS), entries: [] };
+let tab = "rec";
+let tlDate = dayStart(Date.now());   // タイムラインの表示日
+let anaMode = "day";
+let tickTimer = null;
+let saveTimer = null;
+
+/* ---------------- storage (localStorage) ---------------- */
+async function load(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw){
+      const d = JSON.parse(raw);
+      if(d.categories && d.entries) state = d;
+    }
+  }catch(e){ console.error("load failed", e); }
+}
+function save(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(()=>{
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch(e){ toast("保存に失敗しました"); }
+  }, 400);
+}
+
+/* ---------------- utils ---------------- */
+function dayStart(t){ const d=new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
+function fmtHM(t){ const d=new Date(t); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function fmtDur(ms){
+  const m = Math.floor(ms/60000);
+  if(m < 60) return m + "分";
+  return Math.floor(m/60) + "時間" + (m%60 ? String(m%60)+"分" : "");
+}
+function fmtDurShort(ms){
+  const m = Math.round(ms/60000);
+  return Math.floor(m/60) + ":" + String(m%60).padStart(2,"0");
+}
+function fmtDateJ(t){
+  const d=new Date(t), w="日月火水木金土"[d.getDay()];
+  return (d.getMonth()+1)+"/"+d.getDate()+"("+w+")";
+}
+function cat(id){ return state.categories.find(c=>c.id===id) || {name:"不明",emoji:"❓",color:"#999",id}; }
+function ongoing(){ return state.entries.find(e=>e.end===null) || null; }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function esc(s){ return String(s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+
+/* 指定日の中でエントリが占める区間 [s,e] を返す(日跨ぎはクリップ) */
+function clipToDay(e, day){
+  const ds=day, de=day+86400000;
+  const end = e.end===null ? Date.now() : e.end;
+  const s = Math.max(e.start, ds), x = Math.min(end, de);
+  return x > s ? [s,x] : null;
+}
+function entriesOfDay(day){
+  return state.entries
+    .map(e=>{ const c=clipToDay(e,day); return c ? {e, s:c[0], x:c[1]} : null; })
+    .filter(Boolean).sort((a,b)=>a.s-b.s);
+}
+function totalsOfDay(day){
+  const t={};
+  for(const {e,s,x} of entriesOfDay(day)) t[e.cat]=(t[e.cat]||0)+(x-s);
+  return t;
+}
+
+/* ---------------- actions ---------------- */
+function startCat(catId){
+  const now = Date.now();
+  const cur = ongoing();
+  if(cur && cur.cat === catId){          // 同じボタン → 停止
+    cur.end = now; save(); render();
+    toast(cat(catId).name + " を終了"); return;
+  }
+  if(cur) cur.end = now;                 // 前の行動を閉じる
+  state.entries.push({id:uid(), cat:catId, start:now, end:null});
+  save(); render();
+  toast(cat(catId).name + " を開始");
+}
+function stopCurrent(){
+  const cur = ongoing();
+  if(cur){ cur.end = Date.now(); save(); render(); toast("記録を停止"); }
+}
+function deleteEntry(id){
+  state.entries = state.entries.filter(e=>e.id!==id);
+  save(); render();
+}
+
+/* ---------------- render ---------------- */
+const NAVS=[["rec","✏️","記録"],["tl","📋","タイムライン"],["ana","📊","分析"],["set","⚙️","設定"]];
+function renderNav(){
+  document.getElementById("nav").innerHTML = NAVS.map(([id,ico,nm])=>
+    `<button class="${tab===id?'on':''}" onclick="switchTab('${id}')"><span class="ico">${ico}</span>${nm}</button>`).join("");
+}
+function switchTab(t){ tab=t; render(); }
+
+function render(){
+  document.getElementById("hdrDate").textContent = fmtDateJ(Date.now());
+  renderNav();
+  clearInterval(tickTimer);
+  const m = document.getElementById("main");
+  if(tab==="rec") renderRec(m);
+  else if(tab==="tl") renderTL(m);
+  else if(tab==="ana") renderAna(m);
+  else renderSet(m);
+}
+
+/* ---- 記録タブ ---- */
+function renderRec(m){
+  const cur = ongoing();
+  const totals = totalsOfDay(dayStart(Date.now()));
+  let nowHtml;
+  if(cur){
+    const c = cat(cur.cat);
+    nowHtml = `<div class="card now-card" style="background:${c.color}">
+      <div class="nc-name">${c.emoji} ${esc(c.name)}</div>
+      <div class="nc-time" id="elapsed">--:--</div>
+      <div class="nc-since">${fmtHM(cur.start)} 開始</div>
+      <button class="nc-stop" onclick="stopCurrent()">停止</button>
+    </div>`;
+  }else{
+    nowHtml = `<div class="card now-card idle">
+      <div class="nc-name">記録なし</div>
+      <div class="nc-since">下のボタンをタップで記録開始。<br>別のボタンを押すと前の行動は自動で終了します。</div>
+    </div>`;
+  }
+  m.innerHTML = nowHtml
+    + `<div class="sec-label">いま何してる?</div>`
+    + `<div class="cat-grid">` + state.categories.map(c=>{
+        const on = cur && cur.cat===c.id;
+        const t = totals[c.id];
+        return `<button class="cat-btn ${on?'active':''}" style="--cat:${c.color}" onclick="startCat('${c.id}')">
+          <span class="emoji">${c.emoji}</span><span class="nm">${esc(c.name)}</span>
+          <span class="tot">${t?("今日 "+fmtDurShort(t)):"&nbsp;"}</span><span class="dot"></span>
+        </button>`;
+      }).join("") + `</div>`;
+
+  if(cur){
+    const upd=()=>{ const el=document.getElementById("elapsed");
+      if(!el) return;
+      const s=Math.floor((Date.now()-cur.start)/1000);
+      el.textContent = String(Math.floor(s/3600)).padStart(2,"0")+":"+String(Math.floor(s%3600/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
+    };
+    upd(); tickTimer=setInterval(upd,1000);
+  }
+}
+
+/* ---- タイムラインタブ ---- */
+function shiftDay(n){ tlDate += n*86400000; render(); }
+function renderTL(m){
+  const list = entriesOfDay(tlDate);
+  const isToday = tlDate === dayStart(Date.now());
+  const H = 720; // 24h × 30px
+
+  let band = "";
+  for(let h=0; h<24; h++) band += `<div class="tl-hour" style="top:${h/24*100}%">${h}</div>`;
+  for(const {e,s,x} of list){
+    const top=(s-tlDate)/86400000*100, hgt=Math.max((x-s)/86400000*100, .45);
+    band += `<div class="tl-blk" style="top:${top}%;height:${hgt}%;background:${cat(e.cat).color}" title="${esc(cat(e.cat).name)}"></div>`;
+  }
+  if(isToday) band += `<div class="tl-now" style="top:${(Date.now()-tlDate)/86400000*100}%"></div>`;
+
+  const items = list.length ? list.map(({e,s,x})=>{
+    const c=cat(e.cat);
+    return `<div class="tl-item" onclick="openEdit('${e.id}')">
+      <div class="bar" style="background:${c.color}"></div>
+      <div class="ti-main">
+        <div class="ti-name">${c.emoji} ${esc(c.name)}${e.end===null?" <small style='color:var(--danger)'>●進行中</small>":""}</div>
+        <div class="ti-time">${fmtHM(s)} 〜 ${e.end===null?"":fmtHM(x)}</div>
+      </div>
+      <div class="ti-dur">${fmtDur(x-s)}</div>
+    </div>`;
+  }).join("") : `<div class="empty">この日の記録はありません</div>`;
+
+  m.innerHTML = `
+    <div class="day-nav">
+      <button onclick="shiftDay(-1)">‹</button>
+      <b>${fmtDateJ(tlDate)}${isToday?" (今日)":""}</b>
+      <button onclick="shiftDay(1)" ${isToday?"disabled style='opacity:.3'":""}>›</button>
+    </div>
+    <div class="tl-wrap">
+      <div class="tl-band" style="height:${H}px">${band}</div>
+      <div class="tl-list">${items}</div>
+    </div>`;
+}
+
+/* ---- 編集モーダル ---- */
+function toLocalInput(t){
+  const d=new Date(t);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")
+    +"T"+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+}
+function openEdit(id){
+  const e = state.entries.find(x=>x.id===id); if(!e) return;
+  const opts = state.categories.map(c=>`<option value="${c.id}" ${c.id===e.cat?"selected":""}>${c.emoji} ${esc(c.name)}</option>`).join("");
+  showModal(`
+    <h3>記録を編集</h3>
+    <div class="fld"><label>カテゴリ</label><select id="edCat">${opts}</select></div>
+    <div class="fld-row">
+      <div class="fld"><label>開始</label><input type="datetime-local" id="edStart" value="${toLocalInput(e.start)}"></div>
+      <div class="fld"><label>終了${e.end===null?"(進行中)":""}</label><input type="datetime-local" id="edEnd" value="${e.end===null?"":toLocalInput(e.end)}"></div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn danger" style="flex:1" onclick="deleteEntry('${id}');closeModal()">削除</button>
+      <button class="btn" style="flex:2" onclick="saveEdit('${id}')">保存</button>
+    </div>
+    <button class="btn ghost" onclick="closeModal()">キャンセル</button>
+  `);
+}
+function saveEdit(id){
+  const e = state.entries.find(x=>x.id===id); if(!e) return;
+  const s = new Date(document.getElementById("edStart").value).getTime();
+  const ev = document.getElementById("edEnd").value;
+  const x = ev ? new Date(ev).getTime() : null;
+  if(isNaN(s)){ toast("開始時刻が不正です"); return; }
+  if(x!==null && (isNaN(x) || x<=s)){ toast("終了は開始より後にしてください"); return; }
+  e.cat = document.getElementById("edCat").value;
+  e.start = s; e.end = x;
+  save(); closeModal(); render();
+}
+
+/* ---- 分析タブ ---- */
+function renderAna(m){
+  const today = dayStart(Date.now());
+  let html = `<div class="seg">
+    <button class="${anaMode==='day'?'on':''}" onclick="anaMode='day';render()">今日</button>
+    <button class="${anaMode==='week'?'on':''}" onclick="anaMode='week';render()">直近7日</button>
+  </div>`;
+
+  if(anaMode==="day"){
+    const totals = totalsOfDay(today);
+    const sum = Object.values(totals).reduce((a,b)=>a+b,0);
+    const recorded = sum, elapsed = Date.now()-today;
+    html += `<div class="kpi-grid">
+      <div class="kpi"><div class="k-lbl">記録済み時間</div><div class="k-val">${fmtDur(recorded)||"0分"}</div></div>
+      <div class="kpi"><div class="k-lbl">記録カバー率</div><div class="k-val">${elapsed?Math.round(recorded/elapsed*100):0}%</div></div>
+    </div>`;
+    html += `<div class="card">` + breakdownRows(totals, sum) + `</div>`;
+  }else{
+    // 直近7日
+    const days=[]; for(let i=6;i>=0;i--) days.push(today - i*86400000);
+    const perDay = days.map(d=>totalsOfDay(d));
+    const weekTotal = {};
+    perDay.forEach(t=>{ for(const k in t) weekTotal[k]=(weekTotal[k]||0)+t[k]; });
+    const wSum = Object.values(weekTotal).reduce((a,b)=>a+b,0);
+    const maxDay = Math.max(...perDay.map(t=>Object.values(t).reduce((a,b)=>a+b,0)), 1);
+
+    html += `<div class="kpi-grid">
+      <div class="kpi"><div class="k-lbl">7日合計</div><div class="k-val">${fmtDur(wSum)||"0分"}</div></div>
+      <div class="kpi"><div class="k-lbl">1日平均</div><div class="k-val">${fmtDur(wSum/7)||"0分"}</div></div>
+    </div>`;
+
+    // 積み上げ棒
+    html += `<div class="card"><div class="sec-label" style="margin-top:0">日別の内訳</div><div class="week-chart">` +
+      days.map((d,i)=>{
+        const t=perDay[i], dSum=Object.values(t).reduce((a,b)=>a+b,0);
+        const stack = state.categories.filter(c=>t[c.id]).map(c=>
+          `<div style="height:${t[c.id]/maxDay*140}px;background:${c.color}"></div>`).join("");
+        return `<div class="wc-col"><div class="wc-stack">${stack}</div><div class="wc-lbl">${new Date(d).getDate()}<br><span style="font-size:9px">${dSum?fmtDurShort(dSum):""}</span></div></div>`;
+      }).join("") + `</div></div>`;
+
+    html += `<div class="card">` + breakdownRows(weekTotal, wSum) + `</div>`;
+  }
+  m.innerHTML = html;
+}
+function breakdownRows(totals, sum){
+  const rows = state.categories
+    .filter(c=>totals[c.id])
+    .sort((a,b)=>totals[b.id]-totals[a.id])
+    .map(c=>{
+      const v=totals[c.id], pct=sum?Math.round(v/sum*100):0;
+      return `<div class="stat-row">
+        <div class="sr-emoji">${c.emoji}</div>
+        <div class="sr-body">
+          <div class="sr-top"><span>${esc(c.name)}</span><b>${fmtDur(v)}<small style="color:var(--sub)"> ${pct}%</small></b></div>
+          <div class="sr-track"><div class="sr-fill" style="width:${pct}%;background:${c.color}"></div></div>
+        </div>
+      </div>`;
+    }).join("");
+  return rows || `<div class="empty">記録がまだありません</div>`;
+}
+
+/* ---- 設定タブ ---- */
+function renderSet(m){
+  m.innerHTML = `
+    <div class="sec-label">カテゴリ</div>
+    <div class="card">` +
+      state.categories.map(c=>`<div class="set-item">
+        <span class="se">${c.emoji}</span><span class="sn">${esc(c.name)}</span>
+        <span class="sc" style="background:${c.color}"></span>
+        <button onclick="openCatEdit('${c.id}')">✎</button>
+        <button onclick="removeCat('${c.id}')">✕</button>
+      </div>`).join("") +
+    `</div>
+    <button class="btn ghost" onclick="openCatEdit(null)">＋ カテゴリを追加</button>
+    <div class="sec-label">データ</div>
+    <button class="btn ghost" onclick="exportJson()">JSONをエクスポート</button>
+    <button class="btn danger" onclick="clearAll()">全データを削除</button>
+    <p style="font-size:11.5px;color:var(--sub);margin-top:14px">
+      記録件数: ${state.entries.length} 件。データはこのアプリ内のストレージに保存されます。
+    </p>`;
+}
+function openCatEdit(id){
+  const c = id ? cat(id) : {id:null, name:"", emoji:"⭐", color:PALETTE[state.categories.length % PALETTE.length]};
+  const colors = PALETTE.map(p=>`<button class="cbtn ${p===c.color?'on':''}" style="background:${p}" onclick="pickColor(this,'${p}')"></button>`).join("");
+  showModal(`
+    <h3>${id?"カテゴリを編集":"カテゴリを追加"}</h3>
+    <div class="fld-row">
+      <div class="fld" style="flex:0 0 80px"><label>絵文字</label><input id="ceEmoji" value="${c.emoji}" maxlength="4" style="text-align:center;font-size:20px"></div>
+      <div class="fld"><label>名前</label><input id="ceName" value="${esc(c.name)}" placeholder="例: 副業"></div>
+    </div>
+    <div class="fld"><label>色</label><div class="color-row" id="ceColors" data-color="${c.color}">${colors}</div></div>
+    <div class="modal-acts">
+      <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
+      <button class="btn" style="flex:2" onclick="saveCat(${id?`'${id}'`:"null"})">保存</button>
+    </div>
+  `);
+}
+function pickColor(el, color){
+  document.querySelectorAll("#ceColors .cbtn").forEach(b=>b.classList.remove("on"));
+  el.classList.add("on");
+  document.getElementById("ceColors").dataset.color = color;
+}
+function saveCat(id){
+  const name = document.getElementById("ceName").value.trim();
+  const emoji = document.getElementById("ceEmoji").value.trim() || "⭐";
+  const color = document.getElementById("ceColors").dataset.color;
+  if(!name){ toast("名前を入力してください"); return; }
+  if(id){ const c=cat(id); c.name=name; c.emoji=emoji; c.color=color; }
+  else state.categories.push({id:uid(), name, emoji, color});
+  save(); closeModal(); render();
+}
+function removeCat(id){
+  const used = state.entries.some(e=>e.cat===id);
+  if(!confirm(cat(id).name + " を削除しますか?" + (used?"\n(過去の記録は「不明」表示になります)":""))) return;
+  state.categories = state.categories.filter(c=>c.id!==id);
+  save(); render();
+}
+function exportJson(){
+  const blob = new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "otona-log-" + new Date().toISOString().slice(0,10) + ".json";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function clearAll(){
+  if(!confirm("全ての記録とカテゴリ設定を削除します。よろしいですか?")) return;
+  state = { categories: structuredClone(DEFAULT_CATS), entries: [] };
+  save(); render(); toast("初期化しました");
+}
+
+/* ---- modal / toast ---- */
+function showModal(html){
+  closeModal();
+  const bg = document.createElement("div");
+  bg.className="modal-bg"; bg.id="modalBg";
+  bg.innerHTML = `<div class="modal">${html}</div>`;
+  bg.addEventListener("click", e=>{ if(e.target===bg) closeModal(); });
+  document.body.appendChild(bg);
+}
+function closeModal(){ document.getElementById("modalBg")?.remove(); }
+let toastTimer=null;
+function toast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove("show"),1800);
+}
+
+/* ---- boot ---- */
+(async ()=>{ await load(); render(); })();
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+</script>
+</body>
+</html>
