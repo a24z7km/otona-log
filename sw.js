@@ -1,4 +1,4 @@
-const CACHE = "otona-log-v3";
+const CACHE = "otona-log-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -28,6 +28,12 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  const url = new URL(e.request.url);
+  if (
+    url.hostname === "accounts.google.com" ||
+    url.hostname === "www.googleapis.com" ||
+    url.hostname.endsWith(".googleapis.com")
+  ) return;
   e.respondWith(
     caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
       const copy = res.clone();
