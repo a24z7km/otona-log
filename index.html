@@ -230,7 +230,11 @@ const DEFAULT_SETTINGS = { sleepCatId:"sleep", restCatId:"rest", googleClientId:
 const HEALTH_TYPES = {
   pee:{emoji:"🚽", name:"小"},
   poo:{emoji:"💩", name:"大"},
-  water:{emoji:"💧", name:"水分"}
+  water:{emoji:"💧", name:"水分", unit:"ml", step:"10", min:"1"},
+  caffeine:{emoji:"☕", name:"カフェイン", unit:"mg", step:"10", min:"1"},
+  alcohol:{emoji:"🍺", name:"アルコール", unit:"g", step:"1", min:"0.1"},
+  mood:{emoji:"😐", name:"気分", unit:"", step:"1", min:"1"},
+  weight:{emoji:"⚖️", name:"体重", unit:"kg", step:"0.1", min:"1"}
 };
 const CAL_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
@@ -275,11 +279,14 @@ function normalizeState(d){
     .filter(l=>l && HEALTH_TYPES[l.type] && Number.isFinite(Number(l.time)))
     .map(l=>{
       const log = {id:l.id || uid(), type:l.type, time:Number(l.time)};
-      if(l.type==="water") log.value = Math.max(0, Math.round(Number(l.value) || 0));
+      if(["water","caffeine"].includes(l.type)) log.value = Math.max(0, Math.round(Number(l.value) || 0));
+      if(l.type==="alcohol") log.value = Math.max(0, Math.round((Number(l.value) || 0) * 10) / 10);
+      if(l.type==="mood") log.value = Math.min(5, Math.max(1, Math.round(Number(l.value) || 0)));
+      if(l.type==="weight") log.value = Math.max(0, Math.round((Number(l.value) || 0) * 10) / 10);
       if(typeof l.note === "string" && l.note) log.note = l.note;
       return log;
     })
-    .filter(l=>l.type!=="water" || l.value > 0);
+    .filter(l=>!["water","caffeine","alcohol","mood","weight"].includes(l.type) || l.value > 0);
   return next;
 }
 function save(){
@@ -335,16 +342,42 @@ function logsOfDay(day){
 }
 function healthName(type){ return HEALTH_TYPES[type]?.name || "不明"; }
 function healthEmoji(type){ return HEALTH_TYPES[type]?.emoji || "•"; }
+function healthUnit(type){ return HEALTH_TYPES[type]?.unit || ""; }
+function healthValueText(l){
+  if(!("value" in l)) return "";
+  if(l.type==="mood") return moodEmoji(l.value) + String(l.value);
+  const unit = healthUnit(l.type);
+  return unit ? `${l.value}${unit}` : String(l.value);
+}
+function moodEmoji(v){ return ({1:"😩",2:"😕",3:"😐",4:"🙂",5:"😄"})[Math.round(Number(v))] || "😐"; }
+function latestWeight(before=Infinity){
+  return state.logs
+    .filter(l=>l.type==="weight" && Number.isFinite(Number(l.value)) && l.time<=before)
+    .sort((a,b)=>b.time-a.time)[0] || null;
+}
 function healthSummaryOfDay(day){
-  const t={pee:0, poo:0, water:0};
+  const t={pee:0, poo:0, water:0, caffeine:0, alcohol:0, moodSum:0, moodCount:0, weight:null};
   logsOfDay(day).forEach(l=>{
     if(l.type==="water") t.water += Number(l.value || 0);
+    else if(l.type==="caffeine") t.caffeine += Number(l.value || 0);
+    else if(l.type==="alcohol") t.alcohol += Number(l.value || 0);
+    else if(l.type==="mood"){ t.moodSum += Number(l.value || 0); t.moodCount++; }
+    else if(l.type==="weight") t.weight = Number(l.value || 0);
     else if(l.type in t) t[l.type]++;
   });
   return t;
 }
 function healthSummaryOfDays(days){
-  return days.map(healthSummaryOfDay).reduce((a,b)=>({pee:a.pee+b.pee, poo:a.poo+b.poo, water:a.water+b.water}), {pee:0,poo:0,water:0});
+  return days.map(healthSummaryOfDay).reduce((a,b)=>({
+    pee:a.pee+b.pee,
+    poo:a.poo+b.poo,
+    water:a.water+b.water,
+    caffeine:a.caffeine+b.caffeine,
+    alcohol:a.alcohol+b.alcohol,
+    moodSum:a.moodSum+b.moodSum,
+    moodCount:a.moodCount+b.moodCount,
+    weight:b.weight ?? a.weight
+  }), {pee:0,poo:0,water:0,caffeine:0,alcohol:0,moodSum:0,moodCount:0,weight:null});
 }
 function settingCatId(key){ return state.settings?.[key] || null; }
 function latestEndedToday(catId, day){
@@ -436,21 +469,59 @@ function deleteEntry(id){
 }
 function addHealthLog(type, value=null){
   const log = {id:uid(), type, time:Date.now()};
-  if(type==="water") log.value = Math.max(1, Math.round(Number(value) || 0));
-  if(type==="water" && !log.value){ toast("水分量を入力してください"); return; }
+  if(["water","caffeine"].includes(type)) log.value = Math.max(0, Math.round(Number(value) || 0));
+  if(type==="alcohol") log.value = Math.max(0, Math.round((Number(value) || 0) * 10) / 10);
+  if(type==="mood") log.value = Math.min(5, Math.max(1, Math.round(Number(value) || 0)));
+  if(type==="weight") log.value = Math.max(0, Math.round((Number(value) || 0) * 10) / 10);
+  if(["water","caffeine","alcohol","mood","weight"].includes(type) && !log.value){ toast(`${healthName(type)}の値を入力してください`); return false; }
   state.logs.push(log);
   save(); render();
-  toast(type==="water" ? `水分 ${log.value}ml を記録` : `${healthName(type)}を記録`);
+  toast(healthValueText(log) ? `${healthName(type)} ${healthValueText(log)} を記録` : `${healthName(type)}を記録`);
+  return true;
 }
-function openWaterSheet(){
-  const opts = [100,200,300,500].map(v=>`<button class="btn ghost" onclick="addHealthLog('water',${v});closeModal()">${v}ml</button>`).join("");
+function openAmountSheet(type, title, presets, placeholder){
+  const unit = healthUnit(type);
+  const opts = presets.map(p=>`<button class="btn ghost" onclick="if(addHealthLog('${type}',${p.value})) closeModal()">${esc(p.label)}</button>`).join("");
   showModal(`
-    <h3>水分量を記録</h3>
+    <h3>${title}</h3>
+    <p style="font-size:11.5px;color:var(--sub);margin:-6px 0 10px">量は目安です。</p>
     ${opts}
-    <div class="fld" style="margin-top:14px"><label>自由入力(ml)</label><input id="waterCustom" type="number" min="1" step="10" inputmode="numeric" placeholder="例: 250"></div>
+    <div class="fld" style="margin-top:14px"><label>自由入力(${unit})</label><input id="amountCustom" type="number" min="${HEALTH_TYPES[type].min}" step="${HEALTH_TYPES[type].step}" inputmode="decimal" placeholder="${placeholder}"></div>
     <div class="modal-acts">
       <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
-      <button class="btn" style="flex:1" onclick="addHealthLog('water',document.getElementById('waterCustom').value);closeModal()">記録</button>
+      <button class="btn" style="flex:1" onclick="if(addHealthLog('${type}',document.getElementById('amountCustom').value)) closeModal()">記録</button>
+    </div>
+  `);
+}
+function openWaterSheet(){
+  openAmountSheet("water", "水分量を記録", [
+    {label:"100ml", value:100}, {label:"200ml", value:200}, {label:"300ml", value:300}, {label:"500ml", value:500}
+  ], "例: 250");
+}
+function openCaffeineSheet(){
+  openAmountSheet("caffeine", "カフェインを記録", [
+    {label:"コーヒー1杯(80mg)", value:80}, {label:"濃いめ(120mg)", value:120},
+    {label:"エナジードリンク(140mg)", value:140}, {label:"緑茶(30mg)", value:30}
+  ], "例: 80");
+}
+function openAlcoholSheet(){
+  openAmountSheet("alcohol", "アルコールを記録", [
+    {label:"ビール350ml(14g)", value:14}, {label:"ビール500ml(20g)", value:20},
+    {label:"ワイン1杯(12g)", value:12}, {label:"日本酒1合(22g)", value:22}, {label:"ハイボール1杯(14g)", value:14}
+  ], "例: 14");
+}
+function openMoodSheet(){
+  const opts = [1,2,3,4,5].map(v=>`<button class="btn ghost" onclick="if(addHealthLog('mood',${v})) closeModal()">${moodEmoji(v)} ${v}</button>`).join("");
+  showModal(`<h3>気分を記録</h3>${opts}<button class="btn ghost" onclick="closeModal()">キャンセル</button>`);
+}
+function openWeightSheet(){
+  const prev = latestWeight();
+  showModal(`
+    <h3>体重を記録</h3>
+    <div class="fld"><label>体重(kg)</label><input id="weightCustom" type="number" min="1" step="0.1" inputmode="decimal" placeholder="${prev?`前回 ${prev.value}kg`:"例: 60.5"}"></div>
+    <div class="modal-acts">
+      <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
+      <button class="btn" style="flex:1" onclick="if(addHealthLog('weight',document.getElementById('weightCustom').value)) closeModal()">記録</button>
     </div>
   `);
 }
@@ -460,10 +531,11 @@ function deleteLog(id){
 }
 function openHealthEdit(id){
   const l = state.logs.find(x=>x.id===id); if(!l) return;
+  const valueField = healthValueEditField(l);
   showModal(`
     <h3>${healthEmoji(l.type)} ${healthName(l.type)}を編集</h3>
     <div class="fld"><label>時刻</label><input type="datetime-local" id="logTime" value="${toLocalInput(l.time)}"></div>
-    ${l.type==="water"?`<div class="fld"><label>量ml</label><input id="logValue" type="number" min="1" step="10" inputmode="numeric" value="${Number(l.value || 0)}"></div>`:""}
+    ${valueField}
     <div class="fld"><label>メモ</label><input id="logNote" value="${esc(l.note || "")}" maxlength="100" placeholder="100文字まで"></div>
     <div class="modal-acts">
       <button class="btn danger" style="flex:1" onclick="deleteLog('${id}')">削除</button>
@@ -472,14 +544,25 @@ function openHealthEdit(id){
     <button class="btn ghost" onclick="closeModal()">キャンセル</button>
   `);
 }
+function healthValueEditField(l){
+  if(!["water","caffeine","alcohol","mood","weight"].includes(l.type)) return "";
+  if(l.type==="mood"){
+    return `<div class="fld"><label>気分</label><select id="logValue">${[1,2,3,4,5].map(v=>`<option value="${v}" ${Number(l.value)===v?"selected":""}>${moodEmoji(v)} ${v}</option>`).join("")}</select></div>`;
+  }
+  const unit = healthUnit(l.type);
+  return `<div class="fld"><label>値(${unit})</label><input id="logValue" type="number" min="${HEALTH_TYPES[l.type].min}" step="${HEALTH_TYPES[l.type].step}" inputmode="decimal" value="${Number(l.value || 0)}"></div>`;
+}
 function saveHealthLog(id){
   const l = state.logs.find(x=>x.id===id); if(!l) return;
   const t = new Date(document.getElementById("logTime").value).getTime();
   if(isNaN(t)){ toast("時刻が不正です"); return; }
   l.time = t;
-  if(l.type==="water"){
-    const v = Math.round(Number(document.getElementById("logValue").value) || 0);
-    if(v <= 0){ toast("水分量を入力してください"); return; }
+  if(["water","caffeine","alcohol","mood","weight"].includes(l.type)){
+    let v = Number(document.getElementById("logValue").value);
+    if(l.type==="water" || l.type==="caffeine") v = Math.round(v || 0);
+    else if(l.type==="mood") v = Math.min(5, Math.max(1, Math.round(v || 0)));
+    else v = Math.round((v || 0) * 10) / 10;
+    if(v <= 0){ toast(`${healthName(l.type)}の値を入力してください`); return; }
     l.value = v;
   }
   const note = document.getElementById("logNote").value.trim().slice(0,100);
@@ -677,6 +760,10 @@ function renderRec(m){
         <button class="health-btn" onclick="addHealthLog('pee')"><span class="emoji">🚽</span><span class="nm">小</span></button>
         <button class="health-btn" onclick="addHealthLog('poo')"><span class="emoji">💩</span><span class="nm">大</span></button>
         <button class="health-btn" onclick="openWaterSheet()"><span class="emoji">💧</span><span class="nm">水分</span></button>
+        <button class="health-btn" onclick="openCaffeineSheet()"><span class="emoji">☕</span><span class="nm">カフェイン</span></button>
+        <button class="health-btn" onclick="openAlcoholSheet()"><span class="emoji">🍺</span><span class="nm">アルコール</span></button>
+        <button class="health-btn" onclick="openMoodSheet()"><span class="emoji">😐</span><span class="nm">気分</span></button>
+        <button class="health-btn" onclick="openWeightSheet()"><span class="emoji">⚖️</span><span class="nm">体重</span></button>
       </div>`;
 
   const upd=()=>{
@@ -710,7 +797,7 @@ function renderTimelineBand(day, compact=false){
   }
   for(const l of logsOfDay(day)){
     const top=(l.time-day)/86400000*100;
-    band += `<div class="tl-dot" style="top:${top}%" title="${esc(healthName(l.type))}${l.type==='water'?` ${l.value}ml`:""}">${healthEmoji(l.type)}</div>`;
+    band += `<div class="tl-dot" style="top:${top}%" title="${esc(healthName(l.type))}${healthValueText(l)?` ${esc(healthValueText(l))}`:""}">${healthEmoji(l.type)}</div>`;
   }
   if(isToday) band += `<div class="tl-now" style="top:${(Date.now()-day)/86400000*100}%"></div>`;
   return band;
@@ -732,10 +819,10 @@ function renderTLDay(){
         <div class="bar" style="background:#D7D4CB"></div>
         <div class="ti-main">
           <div class="ti-name">${healthEmoji(l.type)} ${healthName(l.type)}</div>
-          <div class="ti-time">${fmtHM(l.time)}${l.type==="water"?` / ${l.value}ml`:""}</div>
+          <div class="ti-time">${fmtHM(l.time)}${healthValueText(l)?` / ${esc(healthValueText(l))}`:""}</div>
           ${l.note?`<div class="ti-note">${esc(l.note)}</div>`:""}
         </div>
-        <div class="ti-dur">${l.type==="water" ? `${l.value}ml` : ""}</div>
+        <div class="ti-dur">${esc(healthValueText(l))}</div>
       </div>`;
     }
     const {e,s,x}=item, c=cat(e.cat);
@@ -873,6 +960,7 @@ function renderAna(m){
         return `<div class="wc-col"><div class="wc-stack">${stack}</div><div class="wc-lbl">${new Date(d).getDate()}<br><span style="font-size:9px">${dSum?fmtDurShort(dSum):""}</span></div></div>`;
       }).join("") + `</div></div>`;
     html += waterWeekChart(days);
+    html += alcoholWeekChart(days);
 
     html += `<div class="card">` + breakdownRows(weekTotal, wSum) + `</div>`;
   }else{
@@ -882,10 +970,16 @@ function renderAna(m){
 }
 function healthKpisHtml(days){
   const h = healthSummaryOfDays(days);
+  const mood = h.moodCount ? (h.moodSum / h.moodCount).toFixed(1) : "—";
+  const weight = h.weight ? `${h.weight}kg` : "—";
   return `<div class="kpi-grid">
     <div class="kpi"><div class="k-lbl">小</div><div class="k-val">${h.pee}回</div></div>
     <div class="kpi"><div class="k-lbl">大</div><div class="k-val">${h.poo}回</div></div>
     <div class="kpi"><div class="k-lbl">水分</div><div class="k-val">${h.water}ml</div></div>
+    <div class="kpi"><div class="k-lbl">カフェイン</div><div class="k-val">${h.caffeine}mg</div></div>
+    <div class="kpi"><div class="k-lbl">アルコール</div><div class="k-val">${Math.round(h.alcohol*10)/10}g</div></div>
+    <div class="kpi"><div class="k-lbl">気分平均</div><div class="k-val">${mood}</div></div>
+    <div class="kpi"><div class="k-lbl">最新体重</div><div class="k-val">${weight}</div></div>
   </div>`;
 }
 function waterWeekChart(days){
@@ -893,6 +987,13 @@ function waterWeekChart(days){
   const max = Math.max(...vals, 1);
   return `<div class="card"><div class="sec-label" style="margin-top:0">水分の日別合計</div><div class="week-chart">` +
     days.map((d,i)=>`<div class="wc-col"><div class="wc-water" style="height:${vals[i]/max*140}px"></div><div class="wc-lbl">${new Date(d).getDate()}<br><span style="font-size:9px">${vals[i]?vals[i]+"ml":""}</span></div></div>`).join("") +
+    `</div></div>`;
+}
+function alcoholWeekChart(days){
+  const vals = days.map(d=>healthSummaryOfDay(d).alcohol);
+  const max = Math.max(...vals, 1);
+  return `<div class="card"><div class="sec-label" style="margin-top:0">アルコールの日別合計</div><div class="week-chart">` +
+    days.map((d,i)=>`<div class="wc-col"><div class="wc-water" style="height:${vals[i]/max*140}px;background:linear-gradient(180deg,#C98A5E,#D9A441)"></div><div class="wc-lbl">${new Date(d).getDate()}<br><span style="font-size:9px">${vals[i]?Math.round(vals[i]*10)/10+"g":"0"}</span></div></div>`).join("") +
     `</div></div>`;
 }
 function breakdownRows(totals, sum){
@@ -921,6 +1022,9 @@ function renderRhythm(today){
   return `
     <div class="card"><div class="chart-title">就寝・起床時刻の推移</div>${sleepRhythmSvg(days)}</div>
     <div class="card"><div class="chart-title">主要カテゴリの日別時間</div>${majorCategorySvg(days)}</div>
+    <div class="card"><div class="chart-title">カフェイン最終摂取時刻 × 就寝時刻</div>${caffeineSleepSvg(days)}</div>
+    <div class="card"><div class="chart-title">前日睡眠時間 × 当日の気分平均</div>${moodSleepScatter(days)}</div>
+    <div class="card"><div class="chart-title">体重トレンド(直近30日)</div>${weightTrendSvg(today)}</div>
     <div class="card"><div class="chart-title">曜日別の平均内訳</div>${weekdayAverageBars(days)}</div>
   `;
 }
@@ -985,6 +1089,86 @@ function majorCategorySvg(days){
     ${lines}${labels}
   </svg><div class="legend">${cats.map(c=>`<span class="legend-item"><span class="legend-dot" style="background:${c.color}"></span>${esc(c.name)}</span>`).join("")}</div>`;
 }
+function timeAxisHour(t, anchorDay){
+  const d = new Date(t);
+  const h = d.getHours() + d.getMinutes()/60;
+  return dayStart(t) < anchorDay ? h : h < 12 ? h + 24 : h;
+}
+function lastCaffeineBeforeBed(session){
+  if(!session) return null;
+  const startDay = dayStart(session.start);
+  return logsOfDay(startDay)
+    .filter(l=>l.type==="caffeine" && l.time<=session.start)
+    .sort((a,b)=>b.time-a.time)[0] || null;
+}
+function caffeineSleepSvg(days){
+  const sessions = sleepSessions(days);
+  const W=360,H=220,L=42,R=12,T=16,B=28, pw=W-L-R, ph=H-T-B;
+  const x = i => L + (days.length===1 ? pw/2 : i/(days.length-1)*pw);
+  const y = v => T + (v-12)/24*ph;
+  const bed=[], caf=[];
+  sessions.forEach((e,i)=>{
+    if(e) bed.push([x(i), y(timeAxisHour(e.start, days[i]))]);
+    const c = lastCaffeineBeforeBed(e);
+    if(c) caf.push([x(i), y(timeAxisHour(c.time, days[i]))]);
+  });
+  if(!bed.length && !caf.length) return `<div class="empty">睡眠とカフェインの記録がまだありません</div>`;
+  const grid = [12,18,24,30,36].map(v=>`<line class="svg-grid" x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}"></line><text class="svg-label" x="4" y="${y(v)+3}">${v===24?"0":v===30?"6":v===36?"12":v}</text>`).join("");
+  const labels = days.map((d,i)=>i%2===0?`<text class="svg-label" x="${x(i)-5}" y="${H-8}">${new Date(d).getDate()}</text>`:"").join("");
+  return `<svg class="rhythm-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="カフェイン最終摂取時刻と就寝時刻">
+    ${grid}<line class="svg-axis" x1="${L}" y1="${T}" x2="${L}" y2="${H-B}"></line><line class="svg-axis" x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}"></line>
+    ${polyline(caf, "#5B9E8F")}${points(caf, "#5B9E8F")}${polyline(bed, "#7C8DB5")}${points(bed, "#7C8DB5")}${labels}
+  </svg><div class="legend"><span class="legend-item"><span class="legend-dot" style="background:#5B9E8F"></span>カフェイン最終</span><span class="legend-item"><span class="legend-dot" style="background:#7C8DB5"></span>就寝</span></div>`;
+}
+function moodAverageOfDay(day){
+  const vals = logsOfDay(day).filter(l=>l.type==="mood").map(l=>Number(l.value || 0)).filter(Boolean);
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+}
+function sleepMinutesForWakeDay(day){
+  const s = sleepSessions([day])[0];
+  return s ? (s.end - s.start) / 60000 : null;
+}
+function moodSleepScatter(days){
+  const ptsData = days.map(d=>{
+    const mood = moodAverageOfDay(d);
+    const sleep = sleepMinutesForWakeDay(d - 86400000);
+    return mood && sleep ? {mood, sleep} : null;
+  }).filter(Boolean);
+  if(ptsData.length < 5) return `<div class="empty">気分と睡眠を${5-ptsData.length}日分記録すると相関が表示されます</div>`;
+  const W=360,H=220,L=42,R=16,T=16,B=32, pw=W-L-R, ph=H-T-B;
+  const minSleep = Math.min(...ptsData.map(p=>p.sleep), 240);
+  const maxSleep = Math.max(...ptsData.map(p=>p.sleep), 600);
+  const x = v => L + (v-minSleep)/Math.max(maxSleep-minSleep,1)*pw;
+  const y = v => T + (5-v)/4*ph;
+  const dots = ptsData.map(p=>`<circle cx="${x(p.sleep)}" cy="${y(p.mood)}" r="4" fill="#8B7BB5" opacity=".85"></circle>`).join("");
+  return `<svg class="rhythm-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="前日睡眠時間と当日の気分平均">
+    ${[1,3,5].map(v=>`<line class="svg-grid" x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}"></line><text class="svg-label" x="8" y="${y(v)+3}">${v}</text>`).join("")}
+    <line class="svg-axis" x1="${L}" y1="${T}" x2="${L}" y2="${H-B}"></line><line class="svg-axis" x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}"></line>
+    <text class="svg-label" x="${L}" y="${H-8}">${fmtDur(minSleep*60000)}</text><text class="svg-label" x="${W-58}" y="${H-8}">${fmtDur(maxSleep*60000)}</text>${dots}
+  </svg>`;
+}
+function weightTrendSvg(today){
+  const start = today - 29*86400000, end = today + 86400000;
+  const byDay = new Map();
+  state.logs.filter(l=>l.type==="weight" && l.time>=start && l.time<end).forEach(l=>byDay.set(dayStart(l.time), l));
+  const days=[]; for(let d=start; d<end; d+=86400000) days.push(d);
+  const values = days.map((d,i)=>byDay.has(d) ? {i, day:d, value:Number(byDay.get(d).value)} : null).filter(Boolean);
+  if(!values.length) return `<div class="empty">体重の記録がまだありません</div>`;
+  const W=360,H=210,L=38,R=12,T=16,B=28, pw=W-L-R, ph=H-T-B;
+  const min = Math.min(...values.map(p=>p.value)), max = Math.max(...values.map(p=>p.value));
+  const pad = Math.max((max-min)*.12, .5);
+  const lo = min - pad, hi = max + pad;
+  const x = i => L + i/29*pw;
+  const y = v => T + (1 - (v-lo)/Math.max(hi-lo,.1))*ph;
+  const pts = values.map(p=>[x(p.i), y(p.value)]);
+  const labels = days.map((d,i)=>i%5===0?`<text class="svg-label" x="${x(i)-5}" y="${H-8}">${new Date(d).getDate()}</text>`:"").join("");
+  return `<svg class="rhythm-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="体重トレンド">
+    <line class="svg-grid" x1="${L}" y1="${y(hi-pad)}" x2="${W-R}" y2="${y(hi-pad)}"></line><text class="svg-label" x="2" y="${y(hi-pad)+3}">${(hi-pad).toFixed(1)}</text>
+    <line class="svg-grid" x1="${L}" y1="${y(lo+pad)}" x2="${W-R}" y2="${y(lo+pad)}"></line><text class="svg-label" x="2" y="${y(lo+pad)+3}">${(lo+pad).toFixed(1)}</text>
+    <line class="svg-axis" x1="${L}" y1="${T}" x2="${L}" y2="${H-B}"></line><line class="svg-axis" x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}"></line>
+    ${polyline(pts, "#6FA8C9")}${points(pts, "#6FA8C9")}${labels}
+  </svg>`;
+}
 function weekdayAverageBars(days){
   const names = ["日","月","火","水","木","金","土"];
   const counts = Array(7).fill(0), totals = Array.from({length:7},()=>({}));
@@ -1044,10 +1228,11 @@ function renderSet(m){
       </p>
     </div>
     <div class="sec-label">データ</div>
-    <button class="btn ghost" onclick="exportJson()">JSONをエクスポート</button>
-    <button class="btn ghost" onclick="exportCsv()">CSVをエクスポート</button>
-    <button class="btn ghost" onclick="exportHealthCsv()">健康CSVをエクスポート</button>
-    <button class="btn ghost" onclick="exportXlsx()">Excelをエクスポート</button>
+    <button class="btn ghost" onclick="openExportSheet('json')">JSONをエクスポート</button>
+    <button class="btn ghost" onclick="openExportSheet('csv')">CSVをエクスポート</button>
+    <button class="btn ghost" onclick="openExportSheet('xlsx')">Excelをエクスポート</button>
+    <button class="btn ghost" onclick="document.getElementById('jsonImport').click()">JSONをインポート</button>
+    <input id="jsonImport" type="file" accept="application/json,.json" style="display:none" onchange="importJsonFile(this)">
     <button class="btn danger" onclick="clearAll()">全データを削除</button>
     <p style="font-size:11.5px;color:var(--sub);margin-top:14px">
       記録件数: ${state.entries.length} 件。健康記録: ${state.logs.length} 件。データはこのアプリ内のストレージに保存されます。
@@ -1106,19 +1291,53 @@ function removeCat(id){
   if(settingCatId("restCatId")===id) state.settings.restCatId = null;
   save(); render();
 }
-function exportJson(){
-  const blob = new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "otona-log-" + fmtYMD(Date.now()) + ".json";
-  a.click(); URL.revokeObjectURL(a.href);
+function openExportSheet(kind){
+  showModal(`
+    <h3>エクスポート内容を選択</h3>
+    <label class="set-item" style="cursor:pointer"><input id="exActivity" type="checkbox" checked style="width:20px;height:20px"> <span class="sn">行動記録を含める</span></label>
+    <label class="set-item" style="cursor:pointer"><input id="exHealth" type="checkbox" checked style="width:20px;height:20px"> <span class="sn">健康記録を含める</span></label>
+    <div class="modal-acts">
+      <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
+      <button class="btn" style="flex:2" onclick="runExport('${kind}')">エクスポート</button>
+    </div>
+  `);
+}
+function exportSuffix(opts){
+  if(opts.activity && opts.health) return "";
+  if(opts.activity) return "-activity-only";
+  if(opts.health) return "-health-only";
+  return "-empty";
+}
+function exportState(opts){
+  const out = {
+    categories: structuredClone(state.categories),
+    entries: opts.activity ? structuredClone(state.entries) : [],
+    logs: opts.health ? structuredClone(state.logs) : [],
+    settings: structuredClone(state.settings || {})
+  };
+  return out;
+}
+function runExport(kind){
+  const opts = {
+    activity: document.getElementById("exActivity").checked,
+    health: document.getElementById("exHealth").checked
+  };
+  if(!opts.activity && !opts.health){ toast("出力内容を選択してください"); return; }
+  closeModal();
+  if(kind==="json") exportJson(opts);
+  else if(kind==="csv") exportCsv(opts);
+  else exportXlsx(opts);
+}
+function exportJson(opts={activity:true,health:true}){
+  const suffix = exportSuffix(opts);
+  downloadBlob(JSON.stringify(exportState(opts),null,2), "otona-log-" + fmtYMD(Date.now()) + suffix + ".json", "application/json");
 }
 const EXPORT_HEADERS = ["日付","カテゴリ名","開始(HH:MM)","終了(HH:MM)","時間(分)","進行中フラグ","メモ"];
-const HEALTH_EXPORT_HEADERS = ["日付","時刻","種別","量ml","メモ"];
-function exportRows(){
+const HEALTH_EXPORT_HEADERS = ["日付","時刻","種別","値","単位","メモ"];
+function exportRows(entries=state.entries){
   const now = Date.now();
   const rows = [];
-  for(const e of state.entries){
+  for(const e of entries){
     const realEnd = e.end===null ? now : e.end;
     for(let day=dayStart(e.start); day<=dayStart(realEnd); day+=86400000){
       const c = clipToDay({start:e.start,end:realEnd}, day);
@@ -1138,12 +1357,13 @@ function exportRows(){
   }
   return rows.sort((a,b)=>a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
 }
-function exportHealthRows(){
-  return state.logs.slice().sort((a,b)=>a.time-b.time).map(l=>({
+function exportHealthRows(logs=state.logs){
+  return logs.slice().sort((a,b)=>a.time-b.time).map(l=>({
     date:fmtYMD(l.time),
     time:fmtHM(l.time),
     type:healthName(l.type),
-    value:l.type==="water" ? Number(l.value || 0) : "",
+    value:"value" in l ? Number(l.value || 0) : "",
+    unit:healthUnit(l.type),
     note:l.note || ""
   }));
 }
@@ -1151,38 +1371,44 @@ function csvCell(v){
   const s = String(v ?? "");
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
 }
-function exportCsv(){
-  const lines = [EXPORT_HEADERS, ...exportRows().map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing,r.note])]
-    .map(row=>row.map(csvCell).join(","));
-  downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-" + fmtYMD(Date.now()) + ".csv", "text/csv;charset=utf-8");
+function exportCsv(opts={activity:true,health:true}){
+  const suffix = exportSuffix(opts);
+  if(opts.activity){
+    const lines = [EXPORT_HEADERS, ...exportRows().map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing,r.note])]
+      .map(row=>row.map(csvCell).join(","));
+    downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-" + fmtYMD(Date.now()) + suffix + ".csv", "text/csv;charset=utf-8");
+  }
+  if(opts.health){
+    const lines = [HEALTH_EXPORT_HEADERS, ...exportHealthRows().map(r=>[r.date,r.time,r.type,r.value,r.unit,r.note])]
+      .map(row=>row.map(csvCell).join(","));
+    downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-health-" + fmtYMD(Date.now()) + suffix + ".csv", "text/csv;charset=utf-8");
+  }
 }
-function exportHealthCsv(){
-  const lines = [HEALTH_EXPORT_HEADERS, ...exportHealthRows().map(r=>[r.date,r.time,r.type,r.value,r.note])]
-    .map(row=>row.map(csvCell).join(","));
-  downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-health-" + fmtYMD(Date.now()) + ".csv", "text/csv;charset=utf-8");
-}
-function exportXlsx(){
+function exportXlsx(opts={activity:true,health:true}){
   if(!window.XLSX?.utils){
     toast("オフラインのためExcel出力できません。CSVをご利用ください");
     return;
   }
-  const rows = exportRows();
-  const listData = [EXPORT_HEADERS, ...rows.map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing,r.note])];
-  const summary = dailySummary(rows);
   const wb = XLSX.utils.book_new();
-  const listWs = XLSX.utils.aoa_to_sheet(listData);
-  listWs["!cols"] = fitCols(listData);
-  XLSX.utils.book_append_sheet(wb, listWs, "記録一覧");
+  if(opts.activity){
+    const rows = exportRows();
+    const listData = [EXPORT_HEADERS, ...rows.map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing,r.note])];
+    const summary = dailySummary(rows);
+    const listWs = XLSX.utils.aoa_to_sheet(listData);
+    listWs["!cols"] = fitCols(listData);
+    XLSX.utils.book_append_sheet(wb, listWs, "記録一覧");
 
-  const sumWs = XLSX.utils.aoa_to_sheet(summary);
-  sumWs["!cols"] = fitCols(summary);
-  XLSX.utils.book_append_sheet(wb, sumWs, "日別集計");
-
-  const healthData = [HEALTH_EXPORT_HEADERS, ...exportHealthRows().map(r=>[r.date,r.time,r.type,r.value,r.note])];
-  const healthWs = XLSX.utils.aoa_to_sheet(healthData);
-  healthWs["!cols"] = fitCols(healthData);
-  XLSX.utils.book_append_sheet(wb, healthWs, "健康記録");
-  XLSX.writeFile(wb, "otona-log-" + fmtYMD(Date.now()) + ".xlsx");
+    const sumWs = XLSX.utils.aoa_to_sheet(summary);
+    sumWs["!cols"] = fitCols(summary);
+    XLSX.utils.book_append_sheet(wb, sumWs, "日別集計");
+  }
+  if(opts.health){
+    const healthData = [HEALTH_EXPORT_HEADERS, ...exportHealthRows().map(r=>[r.date,r.time,r.type,r.value,r.unit,r.note])];
+    const healthWs = XLSX.utils.aoa_to_sheet(healthData);
+    healthWs["!cols"] = fitCols(healthData);
+    XLSX.utils.book_append_sheet(wb, healthWs, "健康記録");
+  }
+  XLSX.writeFile(wb, "otona-log-" + fmtYMD(Date.now()) + exportSuffix(opts) + ".xlsx");
 }
 function dailySummary(rows){
   const names = [];
@@ -1212,6 +1438,26 @@ function downloadBlob(content, filename, type){
   a.href = URL.createObjectURL(blob);
   a.download = filename;
   a.click(); URL.revokeObjectURL(a.href);
+}
+function importJsonFile(input){
+  const file = input.files?.[0];
+  input.value = "";
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const data = JSON.parse(String(reader.result || ""));
+      if(!data || !Array.isArray(data.categories) || !Array.isArray(data.entries)){
+        toast("JSONの形式が不正です");
+        return;
+      }
+      state = normalizeState(data);
+      save(); render(); toast("JSONをインポートしました");
+    }catch(e){
+      toast("JSONを読み込めませんでした");
+    }
+  };
+  reader.readAsText(file);
 }
 function clearAll(){
   if(!confirm("全ての記録とカテゴリ設定を削除します。よろしいですか?")) return;
