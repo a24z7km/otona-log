@@ -87,15 +87,23 @@
   .sum-chip{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 12px}
   .sum-chip .lbl{font-size:11px;color:var(--sub)}
   .sum-chip .val{font-size:15px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+  .health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .health-btn{border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:12px 6px;font-family:inherit;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;min-height:76px}
+  .health-btn .emoji{font-size:24px;line-height:1}
+  .health-btn .nm{font-size:12.5px;font-weight:700;color:var(--ink)}
 
   /* ---- timeline ---- */
   .day-nav{display:flex;align-items:center;justify-content:space-between;margin:10px 2px 12px}
   .day-nav b{font-size:16px}
   .day-nav button{background:var(--card);border:1px solid var(--line);border-radius:10px;width:44px;height:44px;font-size:18px;cursor:pointer;color:var(--ink)}
   .tl-wrap{display:flex;gap:12px}
+  .cal-lane{position:relative;width:22px;flex-shrink:0;background:rgba(61,78,129,.05);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .cal-blk{position:absolute;left:3px;right:3px;border-radius:4px;background:rgba(61,78,129,.20);border:1px solid rgba(61,78,129,.16)}
+  .cal-all-day{font-size:9px;color:var(--accent);background:rgba(61,78,129,.10);border-radius:5px;padding:1px 3px;margin:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tl-band{position:relative;width:64px;flex-shrink:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
   .tl-hour{position:absolute;left:0;right:0;border-top:1px solid #F0EEE8;font-size:8.5px;color:#C4C2BB;padding-left:3px}
   .tl-blk{position:absolute;left:16px;right:4px;border-radius:4px;opacity:.92}
+  .tl-dot{position:absolute;left:1px;transform:translateY(-50%);font-size:12px;line-height:1;text-shadow:0 1px 2px rgba(255,255,255,.9);z-index:2}
   .tl-now{position:absolute;left:0;right:0;border-top:2px solid var(--danger)}
   .tl-list{flex:1;min-width:0}
   .tl-item{display:flex;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 12px;margin-bottom:8px;cursor:pointer;min-height:44px}
@@ -105,6 +113,15 @@
   .tl-item .ti-time{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
   .tl-item .ti-note{font-size:11.5px;color:var(--sub);margin-top:2px;white-space:pre-wrap;word-break:break-word}
   .tl-item .ti-dur{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent);flex-shrink:0}
+  .week-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:14px}
+  .week-day{min-width:0;cursor:pointer}
+  .week-head{text-align:center;font-size:10px;color:var(--sub);line-height:1.25;margin-bottom:4px}
+  .week-band-wrap{display:flex;gap:2px;justify-content:center}
+  .week-band{position:relative;height:360px;flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .week-band .tl-blk{left:20%;right:8%;border-radius:3px}
+  .week-band .tl-dot{left:1px;font-size:10px}
+  .week-cal{position:relative;width:8px;flex-shrink:0;background:rgba(61,78,129,.05);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .week-total{text-align:center;font-size:9.5px;color:var(--sub);font-variant-numeric:tabular-nums;margin-top:4px}
   .empty{color:var(--sub);text-align:center;padding:36px 0;font-size:13.5px}
 
   /* ---- analysis ---- */
@@ -121,6 +138,7 @@
   .week-chart{display:flex;gap:6px;align-items:flex-end;height:150px;margin-top:6px}
   .wc-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
   .wc-stack{display:flex;flex-direction:column-reverse;border-radius:5px;overflow:hidden}
+  .wc-water{background:linear-gradient(180deg,#6FA8C9,#9CC9DD);border-radius:5px 5px 0 0;min-height:1px}
   .wc-lbl{text-align:center;font-size:10.5px;color:var(--sub);margin-top:4px}
   .kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
   .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
@@ -188,6 +206,7 @@
      state = {
        categories:[{id,name,emoji,color}],
        entries:[{id,cat,start,end,note?}],  // end===null は進行中
+       logs:[{id,type,time,value?,note?}],
        settings:{sleepCatId,restCatId}
      }
    ============================================================ */
@@ -207,14 +226,27 @@ const DEFAULT_CATS = [
   {id:"rest",  name:"休憩",     emoji:"☕", color:"#A8A29B"},
   {id:"read",  name:"読書",     emoji:"📖", color:"#7BA37B"},
 ];
-const DEFAULT_SETTINGS = { sleepCatId:"sleep", restCatId:"rest" };
+const DEFAULT_SETTINGS = { sleepCatId:"sleep", restCatId:"rest", googleClientId:"" };
+const HEALTH_TYPES = {
+  pee:{emoji:"🚽", name:"小"},
+  poo:{emoji:"💩", name:"大"},
+  water:{emoji:"💧", name:"水分"}
+};
+const CAL_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
-let state = { categories: structuredClone(DEFAULT_CATS), entries: [], settings: {...DEFAULT_SETTINGS} };
+let state = { categories: structuredClone(DEFAULT_CATS), entries: [], logs: [], settings: {...DEFAULT_SETTINGS} };
 let tab = "rec";
 let tlDate = dayStart(Date.now());   // タイムラインの表示日
+let tlMode = "day";
 let anaMode = "day";
 let tickTimer = null;
 let saveTimer = null;
+let googleToken = null;
+let googleTokenExpiresAt = 0;
+let googleTokenClient = null;
+let calendarEvents = [];
+let calendarRange = null;
+let calendarLoading = false;
 
 /* ---------------- storage (localStorage) ---------------- */
 async function load(){
@@ -231,6 +263,7 @@ function normalizeState(d){
   const next = {
     categories: Array.isArray(d?.categories) ? d.categories : structuredClone(DEFAULT_CATS),
     entries: Array.isArray(d?.entries) ? d.entries : [],
+    logs: Array.isArray(d?.logs) ? d.logs : [],
     settings: {...DEFAULT_SETTINGS, ...(d?.settings || {})}
   };
   if("sleepCatId" in (d || {})) next.settings.sleepCatId = d.sleepCatId;
@@ -238,6 +271,15 @@ function normalizeState(d){
   if(!next.categories.some(c=>c.id===next.settings.sleepCatId)) next.settings.sleepCatId = null;
   if(!next.categories.some(c=>c.id===next.settings.restCatId)) next.settings.restCatId = null;
   next.entries.forEach(e=>{ if(typeof e.note !== "string") delete e.note; });
+  next.logs = next.logs
+    .filter(l=>l && HEALTH_TYPES[l.type] && Number.isFinite(Number(l.time)))
+    .map(l=>{
+      const log = {id:l.id || uid(), type:l.type, time:Number(l.time)};
+      if(l.type==="water") log.value = Math.max(0, Math.round(Number(l.value) || 0));
+      if(typeof l.note === "string" && l.note) log.note = l.note;
+      return log;
+    })
+    .filter(l=>l.type!=="water" || l.value > 0);
   return next;
 }
 function save(){
@@ -287,6 +329,23 @@ function totalsOfDay(day){
   for(const {e,s,x} of entriesOfDay(day)) t[e.cat]=(t[e.cat]||0)+(x-s);
   return t;
 }
+function logsOfDay(day){
+  const ds=day, de=day+86400000;
+  return state.logs.filter(l=>l.time>=ds && l.time<de).sort((a,b)=>a.time-b.time);
+}
+function healthName(type){ return HEALTH_TYPES[type]?.name || "不明"; }
+function healthEmoji(type){ return HEALTH_TYPES[type]?.emoji || "•"; }
+function healthSummaryOfDay(day){
+  const t={pee:0, poo:0, water:0};
+  logsOfDay(day).forEach(l=>{
+    if(l.type==="water") t.water += Number(l.value || 0);
+    else if(l.type in t) t[l.type]++;
+  });
+  return t;
+}
+function healthSummaryOfDays(days){
+  return days.map(healthSummaryOfDay).reduce((a,b)=>({pee:a.pee+b.pee, poo:a.poo+b.poo, water:a.water+b.water}), {pee:0,poo:0,water:0});
+}
 function settingCatId(key){ return state.settings?.[key] || null; }
 function latestEndedToday(catId, day){
   if(!catId) return null;
@@ -309,6 +368,34 @@ function updateSummary(){
     if(!el) return;
     el.textContent = fmtDur(Date.now() - Number(el.dataset.time));
   });
+}
+function dayRangeForTimeline(){
+  if(tlMode==="week"){
+    const today = dayStart(Date.now());
+    return {start:today-6*86400000, end:today+86400000};
+  }
+  return {start:tlDate, end:tlDate+86400000};
+}
+function calendarConnected(){ return Boolean(googleToken && Date.now() < googleTokenExpiresAt); }
+function eventsOfDay(day){
+  if(!calendarConnected()) return [];
+  const ds=day, de=day+86400000;
+  return calendarEvents.filter(ev=>{
+    const s = ev.startMs ?? ds, e = ev.endMs ?? de;
+    return e>ds && s<de;
+  });
+}
+function calendarBlocks(day, compact=false){
+  const evs = eventsOfDay(day);
+  if(!evs.length) return "";
+  return evs.map(ev=>{
+    if(ev.allDay) return compact ? "" : `<div class="cal-all-day" title="${esc(ev.summary)}">${esc(ev.summary)}</div>`;
+    const c = clipToDay({start:ev.startMs,end:ev.endMs}, day);
+    if(!c) return "";
+    const [s,x] = c;
+    const top=(s-day)/86400000*100, hgt=Math.max((x-s)/86400000*100, compact ? .6 : 1);
+    return `<div class="cal-blk" title="${esc(ev.summary)}" style="top:${top}%;height:${hgt}%"></div>`;
+  }).join("");
 }
 
 /* ---------------- actions ---------------- */
@@ -346,6 +433,139 @@ function stopCurrent(){
 function deleteEntry(id){
   state.entries = state.entries.filter(e=>e.id!==id);
   save(); render();
+}
+function addHealthLog(type, value=null){
+  const log = {id:uid(), type, time:Date.now()};
+  if(type==="water") log.value = Math.max(1, Math.round(Number(value) || 0));
+  if(type==="water" && !log.value){ toast("水分量を入力してください"); return; }
+  state.logs.push(log);
+  save(); render();
+  toast(type==="water" ? `水分 ${log.value}ml を記録` : `${healthName(type)}を記録`);
+}
+function openWaterSheet(){
+  const opts = [100,200,300,500].map(v=>`<button class="btn ghost" onclick="addHealthLog('water',${v});closeModal()">${v}ml</button>`).join("");
+  showModal(`
+    <h3>水分量を記録</h3>
+    ${opts}
+    <div class="fld" style="margin-top:14px"><label>自由入力(ml)</label><input id="waterCustom" type="number" min="1" step="10" inputmode="numeric" placeholder="例: 250"></div>
+    <div class="modal-acts">
+      <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
+      <button class="btn" style="flex:1" onclick="addHealthLog('water',document.getElementById('waterCustom').value);closeModal()">記録</button>
+    </div>
+  `);
+}
+function deleteLog(id){
+  state.logs = state.logs.filter(l=>l.id!==id);
+  save(); closeModal(); render(); toast("健康記録を削除しました");
+}
+function openHealthEdit(id){
+  const l = state.logs.find(x=>x.id===id); if(!l) return;
+  showModal(`
+    <h3>${healthEmoji(l.type)} ${healthName(l.type)}を編集</h3>
+    <div class="fld"><label>時刻</label><input type="datetime-local" id="logTime" value="${toLocalInput(l.time)}"></div>
+    ${l.type==="water"?`<div class="fld"><label>量ml</label><input id="logValue" type="number" min="1" step="10" inputmode="numeric" value="${Number(l.value || 0)}"></div>`:""}
+    <div class="fld"><label>メモ</label><input id="logNote" value="${esc(l.note || "")}" maxlength="100" placeholder="100文字まで"></div>
+    <div class="modal-acts">
+      <button class="btn danger" style="flex:1" onclick="deleteLog('${id}')">削除</button>
+      <button class="btn" style="flex:2" onclick="saveHealthLog('${id}')">保存</button>
+    </div>
+    <button class="btn ghost" onclick="closeModal()">キャンセル</button>
+  `);
+}
+function saveHealthLog(id){
+  const l = state.logs.find(x=>x.id===id); if(!l) return;
+  const t = new Date(document.getElementById("logTime").value).getTime();
+  if(isNaN(t)){ toast("時刻が不正です"); return; }
+  l.time = t;
+  if(l.type==="water"){
+    const v = Math.round(Number(document.getElementById("logValue").value) || 0);
+    if(v <= 0){ toast("水分量を入力してください"); return; }
+    l.value = v;
+  }
+  const note = document.getElementById("logNote").value.trim().slice(0,100);
+  if(note) l.note = note; else delete l.note;
+  save(); closeModal(); render();
+}
+
+function loadGisScript(){
+  return new Promise((resolve,reject)=>{
+    if(window.google?.accounts?.oauth2){ resolve(); return; }
+    const existing = document.querySelector("script[data-gis]");
+    if(existing){ existing.addEventListener("load", resolve, {once:true}); existing.addEventListener("error", reject, {once:true}); return; }
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true; s.defer = true; s.dataset.gis = "1";
+    s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+async function connectCalendar(){
+  const clientId = (state.settings.googleClientId || "").trim();
+  if(!clientId){ toast("クライアントIDを入力してください"); return; }
+  try{
+    await loadGisScript();
+    googleTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: CAL_SCOPE,
+      callback: async res=>{
+        if(res?.access_token){
+          googleToken = res.access_token;
+          googleTokenExpiresAt = Date.now() + Math.max(0, Number(res.expires_in || 3600) - 60) * 1000;
+          toast("Googleカレンダーに接続しました");
+          await refreshCalendarForCurrentView(true);
+          render();
+        }else{
+          toast("Google連携に失敗しました");
+        }
+      }
+    });
+    googleTokenClient.requestAccessToken({prompt:"consent"});
+  }catch(e){
+    console.warn("calendar connect failed", e);
+    toast("Google連携を開始できませんでした");
+  }
+}
+function disconnectCalendar(){
+  googleToken = null; googleTokenExpiresAt = 0; googleTokenClient = null;
+  calendarEvents = []; calendarRange = null;
+  render(); toast("Google連携を解除しました");
+}
+async function refreshCalendarForCurrentView(force=false){
+  const range = dayRangeForTimeline();
+  await loadCalendarEvents(range.start, range.end, force);
+}
+async function loadCalendarEvents(start, end, force=false){
+  if(!calendarConnected() || calendarLoading || navigator.onLine===false) return;
+  if(!force && calendarRange && calendarRange.start<=start && calendarRange.end>=end) return;
+  calendarLoading = true;
+  try{
+    const url = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+      + `?singleEvents=true&orderBy=startTime&maxResults=250&timeMin=${encodeURIComponent(new Date(start).toISOString())}&timeMax=${encodeURIComponent(new Date(end).toISOString())}`;
+    const res = await fetch(url, {headers:{Authorization:`Bearer ${googleToken}`}});
+    if(res.status===401 || res.status===403){
+      googleToken = null; googleTokenExpiresAt = 0; calendarEvents = []; calendarRange = null;
+      return;
+    }
+    if(!res.ok) return;
+    const data = await res.json();
+    calendarEvents = (data.items || []).map(ev=>{
+      const allDay = Boolean(ev.start?.date);
+      const s = ev.start?.dateTime ? new Date(ev.start.dateTime).getTime() : new Date(ev.start?.date + "T00:00:00").getTime();
+      const e = ev.end?.dateTime ? new Date(ev.end.dateTime).getTime() : new Date(ev.end?.date + "T00:00:00").getTime();
+      return {id:ev.id, summary:ev.summary || "(無題)", startMs:s, endMs:e, allDay};
+    }).filter(ev=>Number.isFinite(ev.startMs) && Number.isFinite(ev.endMs));
+    calendarRange = {start,end};
+  }catch(e){
+    console.warn("calendar fetch failed", e);
+  }finally{
+    calendarLoading = false;
+  }
+}
+function scheduleCalendarRefresh(){
+  if(tab!=="tl" || !calendarConnected()) return;
+  const range = dayRangeForTimeline();
+  if(calendarRange && calendarRange.start<=range.start && calendarRange.end>=range.end) return;
+  loadCalendarEvents(range.start, range.end).then(()=>{ if(tab==="tl") render(); }).catch(()=>{});
 }
 
 let pressTimer = null;
@@ -451,9 +671,15 @@ function renderRec(m){
           <span class="emoji">＋</span><span class="nm">追加</span>
           <span class="tot">&nbsp;</span><span class="dot" style="background:transparent"></span>
         </button>
+      </div>
+      <div class="sec-label">けんこう</div>
+      <div class="health-grid">
+        <button class="health-btn" onclick="addHealthLog('pee')"><span class="emoji">🚽</span><span class="nm">小</span></button>
+        <button class="health-btn" onclick="addHealthLog('poo')"><span class="emoji">💩</span><span class="nm">大</span></button>
+        <button class="health-btn" onclick="openWaterSheet()"><span class="emoji">💧</span><span class="nm">水分</span></button>
       </div>`;
 
-  const upd=()=>{ 
+  const upd=()=>{
     const el=document.getElementById("elapsed");
     if(el && cur){
       const s=Math.floor((Date.now()-cur.start)/1000);
@@ -465,22 +691,54 @@ function renderRec(m){
 }
 
 /* ---- タイムラインタブ ---- */
+function setTlMode(mode){ tlMode=mode; render(); }
 function shiftDay(n){ tlDate += n*86400000; render(); }
 function renderTL(m){
-  const list = entriesOfDay(tlDate);
-  const isToday = tlDate === dayStart(Date.now());
-  const H = 720; // 24h × 30px
-
+  m.innerHTML = `<div class="seg">
+    <button class="${tlMode==='day'?'on':''}" onclick="setTlMode('day')">日</button>
+    <button class="${tlMode==='week'?'on':''}" onclick="setTlMode('week')">週</button>
+  </div>` + (tlMode==="week" ? renderTLWeek() : renderTLDay());
+  scheduleCalendarRefresh();
+}
+function renderTimelineBand(day, compact=false){
+  const isToday = day === dayStart(Date.now());
   let band = "";
-  for(let h=0; h<24; h++) band += `<div class="tl-hour" style="top:${h/24*100}%">${h}</div>`;
-  for(const {e,s,x} of list){
-    const top=(s-tlDate)/86400000*100, hgt=Math.max((x-s)/86400000*100, .45);
+  for(let h=0; h<24; h++) band += `<div class="tl-hour" style="top:${h/24*100}%">${compact && h%6!==0 ? "" : h}</div>`;
+  for(const {e,s,x} of entriesOfDay(day)){
+    const top=(s-day)/86400000*100, hgt=Math.max((x-s)/86400000*100, compact ? .6 : .45);
     band += `<div class="tl-blk" style="top:${top}%;height:${hgt}%;background:${cat(e.cat).color}" title="${esc(cat(e.cat).name)}"></div>`;
   }
-  if(isToday) band += `<div class="tl-now" style="top:${(Date.now()-tlDate)/86400000*100}%"></div>`;
-
-  const items = list.length ? list.map(({e,s,x})=>{
-    const c=cat(e.cat);
+  for(const l of logsOfDay(day)){
+    const top=(l.time-day)/86400000*100;
+    band += `<div class="tl-dot" style="top:${top}%" title="${esc(healthName(l.type))}${l.type==='water'?` ${l.value}ml`:""}">${healthEmoji(l.type)}</div>`;
+  }
+  if(isToday) band += `<div class="tl-now" style="top:${(Date.now()-day)/86400000*100}%"></div>`;
+  return band;
+}
+function renderTLDay(){
+  const list = entriesOfDay(tlDate);
+  const logs = logsOfDay(tlDate);
+  const isToday = tlDate === dayStart(Date.now());
+  const H = 720; // 24h × 30px
+  const cal = eventsOfDay(tlDate).length ? `<div class="cal-lane" style="height:${H}px">${calendarBlocks(tlDate)}</div>` : "";
+  const rows = [
+    ...list.map(x=>({kind:"entry", time:x.s, ...x})),
+    ...logs.map(l=>({kind:"log", time:l.time, l}))
+  ].sort((a,b)=>a.time-b.time);
+  const items = rows.length ? rows.map(item=>{
+    if(item.kind==="log"){
+      const l=item.l;
+      return `<div class="tl-item" onclick="openHealthEdit('${l.id}')">
+        <div class="bar" style="background:#D7D4CB"></div>
+        <div class="ti-main">
+          <div class="ti-name">${healthEmoji(l.type)} ${healthName(l.type)}</div>
+          <div class="ti-time">${fmtHM(l.time)}${l.type==="water"?` / ${l.value}ml`:""}</div>
+          ${l.note?`<div class="ti-note">${esc(l.note)}</div>`:""}
+        </div>
+        <div class="ti-dur">${l.type==="water" ? `${l.value}ml` : ""}</div>
+      </div>`;
+    }
+    const {e,s,x}=item, c=cat(e.cat);
     return `<div class="tl-item" onclick="openEdit('${e.id}')">
       <div class="bar" style="background:${c.color}"></div>
       <div class="ti-main">
@@ -492,16 +750,30 @@ function renderTL(m){
     </div>`;
   }).join("") : `<div class="empty">この日の記録はありません</div>`;
 
-  m.innerHTML = `
+  return `
     <div class="day-nav">
       <button onclick="shiftDay(-1)">‹</button>
       <b>${fmtDateJ(tlDate)}${isToday?" (今日)":""}</b>
       <button onclick="shiftDay(1)" ${isToday?"disabled style='opacity:.3'":""}>›</button>
     </div>
     <div class="tl-wrap">
-      <div class="tl-band" style="height:${H}px">${band}</div>
+      ${cal}
+      <div class="tl-band" style="height:${H}px">${renderTimelineBand(tlDate)}</div>
       <div class="tl-list">${items}</div>
     </div>`;
+}
+function renderTLWeek(){
+  const today = dayStart(Date.now());
+  const days=[]; for(let i=6;i>=0;i--) days.push(today - i*86400000);
+  return `<div class="week-grid">` + days.map(day=>{
+    const total = Object.values(totalsOfDay(day)).reduce((a,b)=>a+b,0);
+    const cal = eventsOfDay(day).length ? `<div class="week-cal">${calendarBlocks(day,true)}</div>` : "";
+    return `<div class="week-day" onclick="tlDate=${day};tlMode='day';render()">
+      <div class="week-head">${fmtDateJ(day).replace("(","<br>(")}</div>
+      <div class="week-band-wrap">${cal}<div class="week-band">${renderTimelineBand(day,true)}</div></div>
+      <div class="week-total">${total?fmtDurShort(total):"&nbsp;"}</div>
+    </div>`;
+  }).join("") + `</div>`;
 }
 
 /* ---- 編集モーダル ---- */
@@ -576,7 +848,7 @@ function renderAna(m){
     html += `<div class="kpi-grid">
       <div class="kpi"><div class="k-lbl">記録済み時間</div><div class="k-val">${fmtDur(recorded)||"0分"}</div></div>
       <div class="kpi"><div class="k-lbl">記録カバー率</div><div class="k-val">${elapsed?Math.round(recorded/elapsed*100):0}%</div></div>
-    </div>`;
+    </div>` + healthKpisHtml([today]);
     html += `<div class="card">` + breakdownRows(totals, sum) + `</div>`;
   }else if(anaMode==="week"){
     // 直近7日
@@ -590,7 +862,7 @@ function renderAna(m){
     html += `<div class="kpi-grid">
       <div class="kpi"><div class="k-lbl">7日合計</div><div class="k-val">${fmtDur(wSum)||"0分"}</div></div>
       <div class="kpi"><div class="k-lbl">1日平均</div><div class="k-val">${fmtDur(wSum/7)||"0分"}</div></div>
-    </div>`;
+    </div>` + healthKpisHtml(days);
 
     // 積み上げ棒
     html += `<div class="card"><div class="sec-label" style="margin-top:0">日別の内訳</div><div class="week-chart">` +
@@ -600,12 +872,28 @@ function renderAna(m){
           `<div style="height:${t[c.id]/maxDay*140}px;background:${c.color}"></div>`).join("");
         return `<div class="wc-col"><div class="wc-stack">${stack}</div><div class="wc-lbl">${new Date(d).getDate()}<br><span style="font-size:9px">${dSum?fmtDurShort(dSum):""}</span></div></div>`;
       }).join("") + `</div></div>`;
+    html += waterWeekChart(days);
 
     html += `<div class="card">` + breakdownRows(weekTotal, wSum) + `</div>`;
   }else{
     html += renderRhythm(today);
   }
   m.innerHTML = html;
+}
+function healthKpisHtml(days){
+  const h = healthSummaryOfDays(days);
+  return `<div class="kpi-grid">
+    <div class="kpi"><div class="k-lbl">小</div><div class="k-val">${h.pee}回</div></div>
+    <div class="kpi"><div class="k-lbl">大</div><div class="k-val">${h.poo}回</div></div>
+    <div class="kpi"><div class="k-lbl">水分</div><div class="k-val">${h.water}ml</div></div>
+  </div>`;
+}
+function waterWeekChart(days){
+  const vals = days.map(d=>healthSummaryOfDay(d).water);
+  const max = Math.max(...vals, 1);
+  return `<div class="card"><div class="sec-label" style="margin-top:0">水分の日別合計</div><div class="week-chart">` +
+    days.map((d,i)=>`<div class="wc-col"><div class="wc-water" style="height:${vals[i]/max*140}px"></div><div class="wc-lbl">${new Date(d).getDate()}<br><span style="font-size:9px">${vals[i]?vals[i]+"ml":""}</span></div></div>`).join("") +
+    `</div></div>`;
 }
 function breakdownRows(totals, sum){
   const rows = state.categories
@@ -744,13 +1032,25 @@ function renderSet(m){
       <div class="fld"><label>睡眠として扱うカテゴリ</label>${summarySelect("sleepCatId")}</div>
       <div class="fld" style="margin-bottom:0"><label>休憩として扱うカテゴリ</label>${summarySelect("restCatId")}</div>
     </div>
+    <div class="sec-label">Googleカレンダー連携</div>
+    <div class="card">
+      <div class="fld"><label>OAuthクライアントID</label><input id="googleClientId" value="${esc(state.settings.googleClientId || "")}" placeholder="xxxxx.apps.googleusercontent.com" oninput="saveGoogleClientId(this.value)"></div>
+      <div class="modal-acts">
+        <button class="btn" style="flex:1" onclick="connectCalendar()">連携する</button>
+        <button class="btn ghost" style="flex:1" onclick="disconnectCalendar()">解除</button>
+      </div>
+      <p style="font-size:11.5px;color:var(--sub);margin-top:10px">
+        状態: ${calendarConnected() ? "接続中" : "未接続"}。予定は表示のみで、記録やエクスポートには含めません。
+      </p>
+    </div>
     <div class="sec-label">データ</div>
     <button class="btn ghost" onclick="exportJson()">JSONをエクスポート</button>
     <button class="btn ghost" onclick="exportCsv()">CSVをエクスポート</button>
+    <button class="btn ghost" onclick="exportHealthCsv()">健康CSVをエクスポート</button>
     <button class="btn ghost" onclick="exportXlsx()">Excelをエクスポート</button>
     <button class="btn danger" onclick="clearAll()">全データを削除</button>
     <p style="font-size:11.5px;color:var(--sub);margin-top:14px">
-      記録件数: ${state.entries.length} 件。データはこのアプリ内のストレージに保存されます。
+      記録件数: ${state.entries.length} 件。健康記録: ${state.logs.length} 件。データはこのアプリ内のストレージに保存されます。
     </p>`;
 }
 function summarySelect(key){
@@ -763,6 +1063,10 @@ function summarySelect(key){
 function setSummaryCat(key, value){
   state.settings[key] = value || null;
   save(); render(); toast("設定を保存しました");
+}
+function saveGoogleClientId(value){
+  state.settings.googleClientId = value.trim();
+  save();
 }
 function openCatEdit(id){
   const c = id ? cat(id) : {id:null, name:"", emoji:"⭐", color:PALETTE[state.categories.length % PALETTE.length]};
@@ -810,6 +1114,7 @@ function exportJson(){
   a.click(); URL.revokeObjectURL(a.href);
 }
 const EXPORT_HEADERS = ["日付","カテゴリ名","開始(HH:MM)","終了(HH:MM)","時間(分)","進行中フラグ","メモ"];
+const HEALTH_EXPORT_HEADERS = ["日付","時刻","種別","量ml","メモ"];
 function exportRows(){
   const now = Date.now();
   const rows = [];
@@ -833,6 +1138,15 @@ function exportRows(){
   }
   return rows.sort((a,b)=>a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
 }
+function exportHealthRows(){
+  return state.logs.slice().sort((a,b)=>a.time-b.time).map(l=>({
+    date:fmtYMD(l.time),
+    time:fmtHM(l.time),
+    type:healthName(l.type),
+    value:l.type==="water" ? Number(l.value || 0) : "",
+    note:l.note || ""
+  }));
+}
 function csvCell(v){
   const s = String(v ?? "");
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
@@ -841,6 +1155,11 @@ function exportCsv(){
   const lines = [EXPORT_HEADERS, ...exportRows().map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing,r.note])]
     .map(row=>row.map(csvCell).join(","));
   downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-" + fmtYMD(Date.now()) + ".csv", "text/csv;charset=utf-8");
+}
+function exportHealthCsv(){
+  const lines = [HEALTH_EXPORT_HEADERS, ...exportHealthRows().map(r=>[r.date,r.time,r.type,r.value,r.note])]
+    .map(row=>row.map(csvCell).join(","));
+  downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-health-" + fmtYMD(Date.now()) + ".csv", "text/csv;charset=utf-8");
 }
 function exportXlsx(){
   if(!window.XLSX?.utils){
@@ -858,6 +1177,11 @@ function exportXlsx(){
   const sumWs = XLSX.utils.aoa_to_sheet(summary);
   sumWs["!cols"] = fitCols(summary);
   XLSX.utils.book_append_sheet(wb, sumWs, "日別集計");
+
+  const healthData = [HEALTH_EXPORT_HEADERS, ...exportHealthRows().map(r=>[r.date,r.time,r.type,r.value,r.note])];
+  const healthWs = XLSX.utils.aoa_to_sheet(healthData);
+  healthWs["!cols"] = fitCols(healthData);
+  XLSX.utils.book_append_sheet(wb, healthWs, "健康記録");
   XLSX.writeFile(wb, "otona-log-" + fmtYMD(Date.now()) + ".xlsx");
 }
 function dailySummary(rows){
@@ -891,7 +1215,8 @@ function downloadBlob(content, filename, type){
 }
 function clearAll(){
   if(!confirm("全ての記録とカテゴリ設定を削除します。よろしいですか?")) return;
-  state = { categories: structuredClone(DEFAULT_CATS), entries: [], settings: {...DEFAULT_SETTINGS} };
+  state = { categories: structuredClone(DEFAULT_CATS), entries: [], logs: [], settings: {...DEFAULT_SETTINGS} };
+  googleToken = null; googleTokenExpiresAt = 0; googleTokenClient = null; calendarEvents = []; calendarRange = null;
   save(); render(); toast("初期化しました");
 }
 
