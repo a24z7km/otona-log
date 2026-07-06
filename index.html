@@ -83,6 +83,10 @@
   }
   .cat-btn.add .emoji{font-size:25px;color:var(--sub);font-weight:700}
   .cat-btn.add .nm{color:var(--sub)}
+  .home-summary{display:flex;gap:8px;flex-wrap:wrap;margin:-2px 0 12px}
+  .sum-chip{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 12px}
+  .sum-chip .lbl{font-size:11px;color:var(--sub)}
+  .sum-chip .val{font-size:15px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
 
   /* ---- timeline ---- */
   .day-nav{display:flex;align-items:center;justify-content:space-between;margin:10px 2px 12px}
@@ -99,6 +103,7 @@
   .tl-item .ti-main{flex:1;min-width:0}
   .tl-item .ti-name{font-size:14px;font-weight:600}
   .tl-item .ti-time{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+  .tl-item .ti-note{font-size:11.5px;color:var(--sub);margin-top:2px;white-space:pre-wrap;word-break:break-word}
   .tl-item .ti-dur{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent);flex-shrink:0}
   .empty{color:var(--sub);text-align:center;padding:36px 0;font-size:13.5px}
 
@@ -121,6 +126,18 @@
   .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
   .kpi .k-lbl{font-size:11px;color:var(--sub)}
   .kpi .k-val{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
+  .chart-title{font-size:12px;color:var(--sub);letter-spacing:.08em;margin-bottom:8px}
+  .rhythm-svg{display:block;width:100%;height:auto;overflow:visible}
+  .svg-axis{stroke:#E8E6DF;stroke-width:1}
+  .svg-grid{stroke:#F0EEE8;stroke-width:1}
+  .svg-label{fill:var(--sub);font-size:10px}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .legend-item{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--sub)}
+  .legend-dot{width:10px;height:10px;border-radius:50%}
+  .stack-row{display:grid;grid-template-columns:42px 1fr 42px;gap:8px;align-items:center;margin:8px 0}
+  .stack-name,.stack-total{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums}
+  .stack-bar{height:18px;background:#F0EEE8;border-radius:9px;overflow:hidden;display:flex}
+  .stack-seg{height:100%;min-width:1px}
 
   /* ---- settings ---- */
   .set-item{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line)}
@@ -129,6 +146,7 @@
   .set-item .sn{flex:1;font-size:14.5px}
   .set-item .sc{width:16px;height:16px;border-radius:50%;flex-shrink:0}
   .set-item button{background:none;border:none;color:var(--sub);font-size:16px;cursor:pointer;padding:4px 8px;width:44px;height:44px}
+  .set-select{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-family:inherit;font-size:14px;background:#fff;color:var(--ink);margin-top:6px}
   .btn{display:block;width:100%;background:var(--accent);color:#fff;border:none;border-radius:12px;padding:12px;font-family:inherit;font-size:14.5px;font-weight:700;cursor:pointer;margin-top:8px}
   .btn.ghost{background:var(--card);color:var(--accent);border:1px solid var(--accent)}
   .btn.danger{background:var(--card);color:var(--danger);border:1px solid var(--danger)}
@@ -147,8 +165,10 @@
   .color-row .cbtn.on{border-color:var(--ink)}
   .modal-acts{display:flex;gap:10px;margin-top:16px}
   .modal-acts .btn{margin-top:0}
-  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:13px;padding:9px 20px;border-radius:99px;z-index:40;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
+  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:13px;padding:9px 20px;border-radius:99px;z-index:40;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;display:flex;align-items:center;gap:12px}
   .toast.show{opacity:1}
+  .toast.has-action{pointer-events:auto}
+  .toast button{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:99px;padding:5px 10px;font-family:inherit;font-size:12px;cursor:pointer}
   @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 </head>
@@ -167,7 +187,8 @@
    データ構造:
      state = {
        categories:[{id,name,emoji,color}],
-       entries:[{id,cat,start,end}]  // end===null は進行中
+       entries:[{id,cat,start,end,note?}],  // end===null は進行中
+       settings:{sleepCatId,restCatId}
      }
    ============================================================ */
 
@@ -186,8 +207,9 @@ const DEFAULT_CATS = [
   {id:"rest",  name:"休憩",     emoji:"☕", color:"#A8A29B"},
   {id:"read",  name:"読書",     emoji:"📖", color:"#7BA37B"},
 ];
+const DEFAULT_SETTINGS = { sleepCatId:"sleep", restCatId:"rest" };
 
-let state = { categories: structuredClone(DEFAULT_CATS), entries: [] };
+let state = { categories: structuredClone(DEFAULT_CATS), entries: [], settings: {...DEFAULT_SETTINGS} };
 let tab = "rec";
 let tlDate = dayStart(Date.now());   // タイムラインの表示日
 let anaMode = "day";
@@ -200,9 +222,23 @@ async function load(){
     const raw = localStorage.getItem(STORAGE_KEY);
     if(raw){
       const d = JSON.parse(raw);
-      if(d.categories && d.entries) state = d;
+      if(d.categories && d.entries) state = normalizeState(d);
     }
+    state = normalizeState(state);
   }catch(e){ console.error("load failed", e); }
+}
+function normalizeState(d){
+  const next = {
+    categories: Array.isArray(d?.categories) ? d.categories : structuredClone(DEFAULT_CATS),
+    entries: Array.isArray(d?.entries) ? d.entries : [],
+    settings: {...DEFAULT_SETTINGS, ...(d?.settings || {})}
+  };
+  if("sleepCatId" in (d || {})) next.settings.sleepCatId = d.sleepCatId;
+  if("restCatId" in (d || {})) next.settings.restCatId = d.restCatId;
+  if(!next.categories.some(c=>c.id===next.settings.sleepCatId)) next.settings.sleepCatId = null;
+  if(!next.categories.some(c=>c.id===next.settings.restCatId)) next.settings.restCatId = null;
+  next.entries.forEach(e=>{ if(typeof e.note !== "string") delete e.note; });
+  return next;
 }
 function save(){
   clearTimeout(saveTimer);
@@ -251,6 +287,29 @@ function totalsOfDay(day){
   for(const {e,s,x} of entriesOfDay(day)) t[e.cat]=(t[e.cat]||0)+(x-s);
   return t;
 }
+function settingCatId(key){ return state.settings?.[key] || null; }
+function latestEndedToday(catId, day){
+  if(!catId) return null;
+  return state.entries
+    .filter(e=>e.cat===catId && e.end!==null && dayStart(e.end)===day)
+    .reduce((latest,e)=>Math.max(latest, e.end), 0) || null;
+}
+function summaryHtml(){
+  const today = dayStart(Date.now());
+  const sleepEnd = latestEndedToday(settingCatId("sleepCatId"), today);
+  const restEnd = latestEndedToday(settingCatId("restCatId"), today);
+  const items = [];
+  if(sleepEnd) items.push(`<div class="sum-chip"><div class="lbl">起床から</div><div class="val" id="wakeSince" data-time="${sleepEnd}"></div></div>`);
+  if(restEnd) items.push(`<div class="sum-chip"><div class="lbl">前回の休憩から</div><div class="val" id="restSince" data-time="${restEnd}"></div></div>`);
+  return items.length ? `<div class="home-summary">${items.join("")}</div>` : "";
+}
+function updateSummary(){
+  [["wakeSince","起床から"],["restSince","前回の休憩から"]].forEach(([id])=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.textContent = fmtDur(Date.now() - Number(el.dataset.time));
+  });
+}
 
 /* ---------------- actions ---------------- */
 function startCat(catId){
@@ -265,13 +324,76 @@ function startCat(catId){
   save(); render();
   toast(cat(catId).name + " を開始");
 }
+function startCatAt(catId, start){
+  const now = Date.now();
+  if(isNaN(start) || start > now){ toast("未来の時刻は指定できません"); return; }
+  const cur = ongoing();
+  if(cur && start <= cur.start){ toast("前の記録の開始より後を選んでください"); return; }
+  if(cur) cur.end = start;
+  state.entries.push({id:uid(), cat:catId, start, end:null});
+  save(); closeModal(); render();
+  toast(cat(catId).name + " を開始");
+}
 function stopCurrent(){
   const cur = ongoing();
-  if(cur){ cur.end = Date.now(); save(); render(); toast("記録を停止"); }
+  if(cur){
+    cur.end = Date.now();
+    const id = cur.id;
+    save(); render();
+    toast("記録を停止", "メモを追加", ()=>openNoteEdit(id));
+  }
 }
 function deleteEntry(id){
   state.entries = state.entries.filter(e=>e.id!==id);
   save(); render();
+}
+
+let pressTimer = null;
+let pressCatId = null;
+let suppressClickUntil = 0;
+let ignoreMouseUntil = 0;
+function pressCatStart(ev, catId){
+  if(ev.type==="touchstart") ignoreMouseUntil = Date.now() + 900;
+  if(ev.type==="mousedown" && Date.now() < ignoreMouseUntil) return;
+  if(ev.type==="mousedown" && ev.button!==0) return;
+  clearTimeout(pressTimer);
+  pressCatId = catId;
+  pressTimer = setTimeout(()=>{
+    suppressClickUntil = Date.now() + 800;
+    openStartAdjust(catId);
+  }, 500);
+}
+function pressCatEnd(){
+  clearTimeout(pressTimer);
+  pressTimer = null;
+  pressCatId = null;
+}
+function catTap(ev, catId){
+  if(Date.now() < suppressClickUntil || pressCatId===catId){
+    ev.preventDefault(); ev.stopPropagation(); pressCatEnd();
+    return false;
+  }
+  startCat(catId);
+  return true;
+}
+function openStartAdjust(catId){
+  pressCatEnd();
+  const now = Date.now();
+  const opts = [
+    ["今から",0],["5分前",5],["15分前",15],["30分前",30],["1時間前",60]
+  ].map(([label,min])=>`<button class="btn ghost" onclick="startCatAt('${catId}', ${now - min*60000})">${label}</button>`).join("");
+  showModal(`
+    <h3>${esc(cat(catId).name)} をいつから開始?</h3>
+    ${opts}
+    <div class="fld" style="margin-top:14px">
+      <label>時刻を指定</label>
+      <input type="datetime-local" id="quickStartAt" value="${toLocalInput(now)}">
+    </div>
+    <div class="modal-acts">
+      <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
+      <button class="btn" style="flex:1" onclick="startCatAt('${catId}', new Date(document.getElementById('quickStartAt').value).getTime())">開始</button>
+    </div>
+  `);
 }
 
 /* ---------------- render ---------------- */
@@ -312,12 +434,15 @@ function renderRec(m){
       <div class="nc-since">下のボタンをタップで記録開始。<br>別のボタンを押すと前の行動は自動で終了します。</div>
     </div>`;
   }
-  m.innerHTML = nowHtml
+  m.innerHTML = nowHtml + summaryHtml()
     + `<div class="sec-label">いま何してる?</div>`
     + `<div class="cat-grid">` + state.categories.map(c=>{
         const on = cur && cur.cat===c.id;
         const t = totals[c.id];
-        return `<button class="cat-btn ${on?'active':''}" style="--cat:${c.color}" onclick="startCat('${c.id}')">
+        return `<button class="cat-btn ${on?'active':''}" style="--cat:${c.color}"
+          ontouchstart="pressCatStart(event,'${c.id}')" ontouchend="pressCatEnd()" ontouchcancel="pressCatEnd()"
+          onmousedown="pressCatStart(event,'${c.id}')" onmouseup="pressCatEnd()" onmouseleave="pressCatEnd()"
+          oncontextmenu="return false" onclick="return catTap(event,'${c.id}')">
           <span class="emoji">${c.emoji}</span><span class="nm">${esc(c.name)}</span>
           <span class="tot">${t?("今日 "+fmtDurShort(t)):"&nbsp;"}</span><span class="dot"></span>
         </button>`;
@@ -328,14 +453,15 @@ function renderRec(m){
         </button>
       </div>`;
 
-  if(cur){
-    const upd=()=>{ const el=document.getElementById("elapsed");
-      if(!el) return;
+  const upd=()=>{ 
+    const el=document.getElementById("elapsed");
+    if(el && cur){
       const s=Math.floor((Date.now()-cur.start)/1000);
       el.textContent = String(Math.floor(s/3600)).padStart(2,"0")+":"+String(Math.floor(s%3600/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
     };
-    upd(); tickTimer=setInterval(upd,1000);
-  }
+    updateSummary();
+  };
+  upd(); tickTimer=setInterval(upd, cur ? 1000 : 60000);
 }
 
 /* ---- タイムラインタブ ---- */
@@ -360,6 +486,7 @@ function renderTL(m){
       <div class="ti-main">
         <div class="ti-name">${c.emoji} ${esc(c.name)}${e.end===null?" <small style='color:var(--danger)'>●進行中</small>":""}</div>
         <div class="ti-time">${fmtHM(s)} 〜 ${e.end===null?"":fmtHM(x)}</div>
+        ${e.note?`<div class="ti-note">${esc(e.note)}</div>`:""}
       </div>
       <div class="ti-dur">${fmtDur(x-s)}</div>
     </div>`;
@@ -393,6 +520,7 @@ function openEdit(id){
       <div class="fld"><label>開始</label><input type="datetime-local" id="edStart" value="${toLocalInput(e.start)}"></div>
       <div class="fld"><label>終了${e.end===null?"(進行中)":""}</label><input type="datetime-local" id="edEnd" value="${e.end===null?"":toLocalInput(e.end)}"></div>
     </div>
+    <div class="fld"><label>メモ</label><input id="edNote" value="${esc(e.note || "")}" maxlength="100" placeholder="100文字まで"></div>
     <div class="modal-acts">
       <button class="btn danger" style="flex:1" onclick="deleteEntry('${id}');closeModal()">削除</button>
       <button class="btn" style="flex:2" onclick="saveEdit('${id}')">保存</button>
@@ -409,7 +537,27 @@ function saveEdit(id){
   if(x!==null && (isNaN(x) || x<=s)){ toast("終了は開始より後にしてください"); return; }
   e.cat = document.getElementById("edCat").value;
   e.start = s; e.end = x;
+  const note = document.getElementById("edNote").value.trim().slice(0,100);
+  if(note) e.note = note; else delete e.note;
   save(); closeModal(); render();
+}
+function openNoteEdit(id){
+  const e = state.entries.find(x=>x.id===id); if(!e) return;
+  showModal(`
+    <h3>メモを追加</h3>
+    <div class="fld"><label>${esc(cat(e.cat).name)} のメモ</label><input id="noteOnly" value="${esc(e.note || "")}" maxlength="100" placeholder="100文字まで"></div>
+    <div class="modal-acts">
+      <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
+      <button class="btn" style="flex:2" onclick="saveNote('${id}')">保存</button>
+    </div>
+  `);
+  setTimeout(()=>document.getElementById("noteOnly")?.focus(), 50);
+}
+function saveNote(id){
+  const e = state.entries.find(x=>x.id===id); if(!e) return;
+  const note = document.getElementById("noteOnly").value.trim().slice(0,100);
+  if(note) e.note = note; else delete e.note;
+  save(); closeModal(); render(); toast("メモを保存しました");
 }
 
 /* ---- 分析タブ ---- */
@@ -418,6 +566,7 @@ function renderAna(m){
   let html = `<div class="seg">
     <button class="${anaMode==='day'?'on':''}" onclick="anaMode='day';render()">今日</button>
     <button class="${anaMode==='week'?'on':''}" onclick="anaMode='week';render()">直近7日</button>
+    <button class="${anaMode==='rhythm'?'on':''}" onclick="anaMode='rhythm';render()">リズム</button>
   </div>`;
 
   if(anaMode==="day"){
@@ -429,7 +578,7 @@ function renderAna(m){
       <div class="kpi"><div class="k-lbl">記録カバー率</div><div class="k-val">${elapsed?Math.round(recorded/elapsed*100):0}%</div></div>
     </div>`;
     html += `<div class="card">` + breakdownRows(totals, sum) + `</div>`;
-  }else{
+  }else if(anaMode==="week"){
     // 直近7日
     const days=[]; for(let i=6;i>=0;i--) days.push(today - i*86400000);
     const perDay = days.map(d=>totalsOfDay(d));
@@ -453,6 +602,8 @@ function renderAna(m){
       }).join("") + `</div></div>`;
 
     html += `<div class="card">` + breakdownRows(weekTotal, wSum) + `</div>`;
+  }else{
+    html += renderRhythm(today);
   }
   m.innerHTML = html;
 }
@@ -473,6 +624,108 @@ function breakdownRows(totals, sum){
   return rows || `<div class="empty">記録がまだありません</div>`;
 }
 
+function renderRhythm(today){
+  const days=[]; for(let i=13;i>=0;i--) days.push(today - i*86400000);
+  const recordedDays = days.filter(d=>entriesOfDay(d).length).length;
+  if(recordedDays < 3){
+    return `<div class="empty">あと${3-recordedDays}日記録するとリズムが表示されます</div>`;
+  }
+  return `
+    <div class="card"><div class="chart-title">就寝・起床時刻の推移</div>${sleepRhythmSvg(days)}</div>
+    <div class="card"><div class="chart-title">主要カテゴリの日別時間</div>${majorCategorySvg(days)}</div>
+    <div class="card"><div class="chart-title">曜日別の平均内訳</div>${weekdayAverageBars(days)}</div>
+  `;
+}
+function sleepSessions(days){
+  const sleepId = settingCatId("sleepCatId");
+  if(!sleepId) return [];
+  const first = days[0], last = days[days.length-1] + 86400000;
+  const byWakeDay = new Map();
+  state.entries
+    .filter(e=>e.cat===sleepId && e.end!==null && e.end>=first && e.end<last)
+    .forEach(e=>{
+      const d = dayStart(e.end);
+      if(!byWakeDay.has(d) || e.end > byWakeDay.get(d).end) byWakeDay.set(d, e);
+    });
+  return days.map(d=>byWakeDay.get(d) || null);
+}
+function rhythmHour(t, wakeDay){
+  const h = new Date(t).getHours() + new Date(t).getMinutes()/60;
+  const d = dayStart(t);
+  if(d < wakeDay) return h;
+  return h < 18 ? h + 24 : h;
+}
+function sleepRhythmSvg(days){
+  const sessions = sleepSessions(days);
+  const W=360,H=220,L=42,R=12,T=16,B=28, pw=W-L-R, ph=H-T-B;
+  const x = i => L + (days.length===1 ? pw/2 : i/(days.length-1)*pw);
+  const y = v => T + (v-18)/18*ph;
+  const bed = [], wake = [];
+  sessions.forEach((e,i)=>{
+    if(!e) return;
+    bed.push([x(i), y(rhythmHour(e.start, days[i]))]);
+    wake.push([x(i), y(rhythmHour(e.end, days[i]))]);
+  });
+  const grid = [18,24,30,36].map(v=>`<line class="svg-grid" x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}"></line><text class="svg-label" x="4" y="${y(v)+3}">${v===24?"0":v===30?"6":v===36?"12":v}</text>`).join("");
+  const labels = days.map((d,i)=>i%2===0?`<text class="svg-label" x="${x(i)-5}" y="${H-8}">${new Date(d).getDate()}</text>`:"").join("");
+  return `<svg class="rhythm-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="就寝と起床の推移">
+    ${grid}<line class="svg-axis" x1="${L}" y1="${T}" x2="${L}" y2="${H-B}"></line><line class="svg-axis" x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}"></line>
+    ${polyline(bed, "#7C8DB5")}${polyline(wake, "#D9A441")}
+    ${points(bed, "#7C8DB5")}${points(wake, "#D9A441")}${labels}
+  </svg><div class="legend"><span class="legend-item"><span class="legend-dot" style="background:#7C8DB5"></span>就寝</span><span class="legend-item"><span class="legend-dot" style="background:#D9A441"></span>起床</span></div>`;
+}
+function majorCategorySvg(days){
+  const sleepId = settingCatId("sleepCatId");
+  const perDay = days.map(d=>totalsOfDay(d));
+  const totals = {};
+  perDay.forEach(t=>{ for(const k in t) if(k!==sleepId) totals[k]=(totals[k]||0)+t[k]; });
+  const cats = state.categories.filter(c=>totals[c.id]).sort((a,b)=>totals[b.id]-totals[a.id]).slice(0,3);
+  if(!cats.length) return `<div class="empty">睡眠以外の記録がまだありません</div>`;
+  const W=360,H=210,L=34,R=12,T=14,B=30, pw=W-L-R, ph=H-T-B;
+  const max = Math.max(...cats.flatMap(c=>perDay.map(t=>(t[c.id]||0)/60000)), 60);
+  const x = i => L + (days.length===1 ? pw/2 : i/(days.length-1)*pw);
+  const y = v => T + (1 - v/max)*ph;
+  const grid = [0,.5,1].map(r=>`<line class="svg-grid" x1="${L}" y1="${T+ph*r}" x2="${W-R}" y2="${T+ph*r}"></line>`).join("");
+  const labels = days.map((d,i)=>i%2===0?`<text class="svg-label" x="${x(i)-5}" y="${H-8}">${new Date(d).getDate()}</text>`:"").join("");
+  const lines = cats.map(c=>{
+    const pts = perDay.map((t,i)=>[x(i), y((t[c.id]||0)/60000)]);
+    return polyline(pts, c.color) + points(pts, c.color);
+  }).join("");
+  return `<svg class="rhythm-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="主要カテゴリの日別時間">
+    ${grid}<text class="svg-label" x="3" y="${T+4}">${Math.round(max/60)}h</text><text class="svg-label" x="8" y="${H-B+3}">0</text>
+    <line class="svg-axis" x1="${L}" y1="${T}" x2="${L}" y2="${H-B}"></line><line class="svg-axis" x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}"></line>
+    ${lines}${labels}
+  </svg><div class="legend">${cats.map(c=>`<span class="legend-item"><span class="legend-dot" style="background:${c.color}"></span>${esc(c.name)}</span>`).join("")}</div>`;
+}
+function weekdayAverageBars(days){
+  const names = ["日","月","火","水","木","金","土"];
+  const counts = Array(7).fill(0), totals = Array.from({length:7},()=>({}));
+  days.forEach(d=>{
+    const wd = new Date(d).getDay();
+    counts[wd]++;
+    const t = totalsOfDay(d);
+    for(const k in t) totals[wd][k] = (totals[wd][k] || 0) + t[k];
+  });
+  const rows = totals.map((t,wd)=>{
+    const avg = {};
+    for(const k in t) avg[k] = t[k] / counts[wd];
+    return avg;
+  });
+  const max = Math.max(...rows.map(t=>Object.values(t).reduce((a,b)=>a+b,0)), 1);
+  return rows.map((t,wd)=>{
+    const sum = Object.values(t).reduce((a,b)=>a+b,0);
+    const segs = state.categories.filter(c=>t[c.id]).map(c=>
+      `<span class="stack-seg" title="${esc(c.name)} ${fmtDur(t[c.id])}" style="width:${t[c.id]/max*100}%;background:${c.color}"></span>`).join("");
+    return `<div class="stack-row"><div class="stack-name">${names[wd]}</div><div class="stack-bar">${segs}</div><div class="stack-total">${sum?fmtDurShort(sum):""}</div></div>`;
+  }).join("") + `<div class="legend">${state.categories.filter(c=>rows.some(t=>t[c.id])).map(c=>`<span class="legend-item"><span class="legend-dot" style="background:${c.color}"></span>${esc(c.name)}</span>`).join("")}</div>`;
+}
+function polyline(pts, color){
+  return pts.length ? `<polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></polyline>` : "";
+}
+function points(pts, color){
+  return pts.map(([px,py])=>`<circle cx="${px}" cy="${py}" r="3.2" fill="${color}" stroke="#fff" stroke-width="1.5"></circle>`).join("");
+}
+
 /* ---- 設定タブ ---- */
 function renderSet(m){
   m.innerHTML = `
@@ -486,6 +739,11 @@ function renderSet(m){
       </div>`).join("") +
     `</div>
     <button class="btn ghost" onclick="openCatEdit(null)">＋ カテゴリを追加</button>
+    <div class="sec-label">ホームサマリー</div>
+    <div class="card">
+      <div class="fld"><label>睡眠として扱うカテゴリ</label>${summarySelect("sleepCatId")}</div>
+      <div class="fld" style="margin-bottom:0"><label>休憩として扱うカテゴリ</label>${summarySelect("restCatId")}</div>
+    </div>
     <div class="sec-label">データ</div>
     <button class="btn ghost" onclick="exportJson()">JSONをエクスポート</button>
     <button class="btn ghost" onclick="exportCsv()">CSVをエクスポート</button>
@@ -494,6 +752,17 @@ function renderSet(m){
     <p style="font-size:11.5px;color:var(--sub);margin-top:14px">
       記録件数: ${state.entries.length} 件。データはこのアプリ内のストレージに保存されます。
     </p>`;
+}
+function summarySelect(key){
+  const current = settingCatId(key);
+  return `<select class="set-select" onchange="setSummaryCat('${key}', this.value)">
+    <option value="" ${current===null?"selected":""}>指定しない</option>
+    ${state.categories.map(c=>`<option value="${c.id}" ${c.id===current?"selected":""}>${c.emoji} ${esc(c.name)}</option>`).join("")}
+  </select>`;
+}
+function setSummaryCat(key, value){
+  state.settings[key] = value || null;
+  save(); render(); toast("設定を保存しました");
 }
 function openCatEdit(id){
   const c = id ? cat(id) : {id:null, name:"", emoji:"⭐", color:PALETTE[state.categories.length % PALETTE.length]};
@@ -529,6 +798,8 @@ function removeCat(id){
   const used = state.entries.some(e=>e.cat===id);
   if(!confirm(cat(id).name + " を削除しますか?" + (used?"\n(過去の記録は「不明」表示になります)":""))) return;
   state.categories = state.categories.filter(c=>c.id!==id);
+  if(settingCatId("sleepCatId")===id) state.settings.sleepCatId = null;
+  if(settingCatId("restCatId")===id) state.settings.restCatId = null;
   save(); render();
 }
 function exportJson(){
@@ -538,7 +809,7 @@ function exportJson(){
   a.download = "otona-log-" + fmtYMD(Date.now()) + ".json";
   a.click(); URL.revokeObjectURL(a.href);
 }
-const EXPORT_HEADERS = ["日付","カテゴリ名","開始(HH:MM)","終了(HH:MM)","時間(分)","進行中フラグ"];
+const EXPORT_HEADERS = ["日付","カテゴリ名","開始(HH:MM)","終了(HH:MM)","時間(分)","進行中フラグ","メモ"];
 function exportRows(){
   const now = Date.now();
   const rows = [];
@@ -555,7 +826,8 @@ function exportRows(){
         start:fmtHM(s),
         end:e.end===null && x===realEnd ? "" : fmtHM(x),
         minutes:Math.round((x-s)/60000),
-        ongoing:e.end===null ? "TRUE" : "FALSE"
+        ongoing:e.end===null ? "TRUE" : "FALSE",
+        note:e.note || ""
       });
     }
   }
@@ -566,7 +838,7 @@ function csvCell(v){
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
 }
 function exportCsv(){
-  const lines = [EXPORT_HEADERS, ...exportRows().map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing])]
+  const lines = [EXPORT_HEADERS, ...exportRows().map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing,r.note])]
     .map(row=>row.map(csvCell).join(","));
   downloadBlob("\uFEFF" + lines.join("\r\n"), "otona-log-" + fmtYMD(Date.now()) + ".csv", "text/csv;charset=utf-8");
 }
@@ -576,7 +848,7 @@ function exportXlsx(){
     return;
   }
   const rows = exportRows();
-  const listData = [EXPORT_HEADERS, ...rows.map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing])];
+  const listData = [EXPORT_HEADERS, ...rows.map(r=>[r.date,r.catName,r.start,r.end,r.minutes,r.ongoing,r.note])];
   const summary = dailySummary(rows);
   const wb = XLSX.utils.book_new();
   const listWs = XLSX.utils.aoa_to_sheet(listData);
@@ -619,7 +891,7 @@ function downloadBlob(content, filename, type){
 }
 function clearAll(){
   if(!confirm("全ての記録とカテゴリ設定を削除します。よろしいですか?")) return;
-  state = { categories: structuredClone(DEFAULT_CATS), entries: [] };
+  state = { categories: structuredClone(DEFAULT_CATS), entries: [], settings: {...DEFAULT_SETTINGS} };
   save(); render(); toast("初期化しました");
 }
 
@@ -639,11 +911,24 @@ function showModal(html){
 }
 function closeModal(){ document.getElementById("modalBg")?.remove(); }
 let toastTimer=null;
-function toast(msg){
+let toastAction = null;
+function toast(msg, actionLabel=null, actionFn=null){
   const t=document.getElementById("toast");
-  t.textContent=msg; t.classList.add("show");
+  toastAction = actionFn;
+  t.classList.toggle("has-action", Boolean(actionLabel && actionFn));
+  t.innerHTML = `<span>${esc(msg)}</span>` + (actionLabel && actionFn ? `<button onclick="runToastAction()">${esc(actionLabel)}</button>` : "");
+  t.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer=setTimeout(()=>t.classList.remove("show"),1800);
+  toastTimer=setTimeout(()=>{
+    t.classList.remove("show","has-action");
+    toastAction = null;
+  }, actionLabel ? 3200 : 1800);
+}
+function runToastAction(){
+  const fn = toastAction;
+  document.getElementById("toast").classList.remove("show");
+  toastAction = null;
+  if(fn) fn();
 }
 
 /* ---- boot ---- */
