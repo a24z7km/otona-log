@@ -1,4 +1,4 @@
-const CACHE = "otona-log-v2";
+const CACHE = "otona-log-v3";
 const ASSETS = [
   "./",
   "./index.html",
