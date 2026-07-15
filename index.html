@@ -96,6 +96,8 @@
   .day-nav{display:flex;align-items:center;justify-content:space-between;margin:10px 2px 12px}
   .day-nav b{font-size:16px}
   .day-nav button{background:var(--card);border:1px solid var(--line);border-radius:10px;width:44px;height:44px;font-size:18px;cursor:pointer;color:var(--ink)}
+  .date-center{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .date-center input{border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);font-family:inherit;font-size:12px;padding:4px 8px}
   .tl-wrap{display:flex;gap:12px}
   .cal-lane{position:relative;width:22px;flex-shrink:0;background:rgba(61,78,129,.05);border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .cal-blk{position:absolute;left:3px;right:3px;border-radius:4px;background:rgba(61,78,129,.20);border:1px solid rgba(61,78,129,.16)}
@@ -212,6 +214,9 @@
    ============================================================ */
 
 const STORAGE_KEY = "otona_log_v1";
+const DB_NAME = "otona_log_device_db";
+const DB_STORE = "state";
+const DB_STATE_KEY = "current";
 const PALETTE = ["#7C8DB5","#5B9E8F","#C98A5E","#8B7BB5","#9AA65C","#D98F9C","#6FA8C9","#D9A441","#A8A29B","#7BA37B","#B56A6A","#5E8CC9"];
 
 const DEFAULT_CATS = [
@@ -238,11 +243,12 @@ const HEALTH_TYPES = {
 };
 const CAL_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
-let state = { categories: structuredClone(DEFAULT_CATS), entries: [], logs: [], settings: {...DEFAULT_SETTINGS} };
+let state = { categories: cloneData(DEFAULT_CATS), entries: [], logs: [], settings: {...DEFAULT_SETTINGS} };
 let tab = "rec";
 let tlDate = dayStart(Date.now());   // タイムラインの表示日
 let tlMode = "day";
 let anaMode = "day";
+let anaDate = dayStart(Date.now());  // 分析の基準日
 let tickTimer = null;
 let saveTimer = null;
 let googleToken = null;
@@ -252,33 +258,139 @@ let calendarEvents = [];
 let calendarRange = null;
 let calendarLoading = false;
 
-/* ---------------- storage (localStorage) ---------------- */
+/* ---------------- storage (device local IndexedDB + localStorage fallback) ---------------- */
 async function load(){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if(raw){
-      const d = JSON.parse(raw);
-      if(d.categories && d.entries) state = normalizeState(d);
+    const stored = await loadDeviceState();
+    if(stored && stored.categories && stored.entries){
+      state = normalizeState(stored);
+    }else{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){
+        const d = JSON.parse(raw);
+        if(d.categories && d.entries) state = normalizeState(d);
+      }
     }
     state = normalizeState(state);
+    persistState({silent:true});
   }catch(e){ console.error("load failed", e); }
 }
+function openDeviceDb(){
+  return new Promise((resolve,reject)=>{
+    if(!("indexedDB" in window)){ reject(new Error("IndexedDB unavailable")); return; }
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = ()=>{
+      const db = req.result;
+      if(!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+    };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error || new Error("IndexedDB open failed"));
+  });
+}
+async function withDeviceStore(mode, fn){
+  const db = await openDeviceDb();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(DB_STORE, mode);
+    const store = tx.objectStore(DB_STORE);
+    let result;
+    tx.oncomplete = ()=>{ db.close(); resolve(result); };
+    tx.onerror = ()=>{ db.close(); reject(tx.error || new Error("IndexedDB transaction failed")); };
+    try{ result = fn(store); }
+    catch(e){ db.close(); reject(e); }
+  });
+}
+async function loadDeviceState(){
+  try{
+    return await withDeviceStore("readonly", store => new Promise((resolve,reject)=>{
+      const req = store.get(DB_STATE_KEY);
+      req.onsuccess = ()=>resolve(req.result || null);
+      req.onerror = ()=>reject(req.error || new Error("IndexedDB read failed"));
+    }));
+  }catch(e){
+    console.warn("device storage read failed", e);
+    return null;
+  }
+}
+async function saveDeviceState(data){
+  await withDeviceStore("readwrite", store => {
+    store.put(data, DB_STATE_KEY);
+  });
+}
+function cloneData(value){
+  if(typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+function safeId(value, fallback=uid()){
+  const s = String(value || "").trim();
+  return /^[A-Za-z0-9_-]{1,80}$/.test(s) ? s : fallback;
+}
+function uniqueId(value, used){
+  let id = safeId(value);
+  while(used.has(id)) id = uid();
+  used.add(id);
+  return id;
+}
+function safeColor(value, fallback){
+  const s = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s : fallback;
+}
 function normalizeState(d){
+  const catIdMap = new Map();
+  const usedCatIds = new Set();
+  let categories = Array.isArray(d?.categories) ? d.categories : cloneData(DEFAULT_CATS);
+  categories = categories.map((c, i)=>{
+    const id = uniqueId(c?.id, usedCatIds);
+    if(c?.id && !catIdMap.has(String(c.id))) catIdMap.set(String(c.id), id);
+    return {
+      id,
+      name: String(c?.name || "カテゴリ").trim().slice(0,40) || "カテゴリ",
+      emoji: Array.from(String(c?.emoji || "⭐")).slice(0,4).join("") || "⭐",
+      color: safeColor(c?.color, PALETTE[i % PALETTE.length])
+    };
+  });
+  if(!categories.length) categories = cloneData(DEFAULT_CATS);
+
   const next = {
-    categories: Array.isArray(d?.categories) ? d.categories : structuredClone(DEFAULT_CATS),
+    categories,
     entries: Array.isArray(d?.entries) ? d.entries : [],
     logs: Array.isArray(d?.logs) ? d.logs : [],
     settings: {...DEFAULT_SETTINGS, ...(d?.settings || {})}
   };
   if("sleepCatId" in (d || {})) next.settings.sleepCatId = d.sleepCatId;
   if("restCatId" in (d || {})) next.settings.restCatId = d.restCatId;
+  next.settings.sleepCatId = catIdMap.get(String(next.settings.sleepCatId)) || next.settings.sleepCatId;
+  next.settings.restCatId = catIdMap.get(String(next.settings.restCatId)) || next.settings.restCatId;
   if(!next.categories.some(c=>c.id===next.settings.sleepCatId)) next.settings.sleepCatId = null;
   if(!next.categories.some(c=>c.id===next.settings.restCatId)) next.settings.restCatId = null;
-  next.entries.forEach(e=>{ if(typeof e.note !== "string") delete e.note; });
+  const usedEntryIds = new Set();
+  next.entries = next.entries
+    .filter(e=>e && Number.isFinite(Number(e.start)) && (e.end===null || Number.isFinite(Number(e.end))))
+    .map(e=>{
+      const start = Number(e.start);
+      const end = e.end===null ? null : Number(e.end);
+      const entry = {
+        id: uniqueId(e.id, usedEntryIds),
+        cat: catIdMap.get(String(e.cat)) || safeId(e.cat),
+        start,
+        end
+      };
+      if(typeof e.note === "string" && e.note.trim()) entry.note = e.note.trim().slice(0,100);
+      return entry;
+    })
+    .filter(e=>e.end===null || e.end>e.start);
+  const openEntries = next.entries.filter(e=>e.end===null).sort((a,b)=>b.start-a.start);
+  if(openEntries.length > 1){
+    const keepId = openEntries[0].id;
+    const now = Date.now();
+    next.entries.forEach(e=>{
+      if(e.end===null && e.id!==keepId) e.end = Math.max(e.start + 60000, now);
+    });
+  }
+  const usedLogIds = new Set();
   next.logs = next.logs
     .filter(l=>l && HEALTH_TYPES[l.type] && Number.isFinite(Number(l.time)))
     .map(l=>{
-      const log = {id:l.id || uid(), type:l.type, time:Number(l.time)};
+      const log = {id:uniqueId(l.id, usedLogIds), type:l.type, time:Number(l.time)};
       if(["water","caffeine"].includes(l.type)) log.value = Math.max(0, Math.round(Number(l.value) || 0));
       if(l.type==="alcohol") log.value = Math.max(0, Math.round((Number(l.value) || 0) * 10) / 10);
       if(l.type==="mood") log.value = Math.min(5, Math.max(1, Math.round(Number(l.value) || 0)));
@@ -292,9 +404,30 @@ function normalizeState(d){
 function save(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch(e){ toast("保存に失敗しました"); }
+    saveTimer = null;
+    persistState();
   }, 400);
+}
+function persistState(opts={}){
+  let localOk = true;
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }catch(e){
+    localOk = false;
+  }
+  saveDeviceState(cloneData(state)).catch(e=>{
+    console.warn("device storage save failed", e);
+    if(!opts.silent) toast(localOk ? "端末内DBへの保存に失敗しました" : "保存に失敗しました");
+  });
+  if(!localOk && !opts.silent) toast("保存に失敗しました");
+  return localOk;
+}
+function flushSave(){
+  if(saveTimer){
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    persistState();
+  }
 }
 
 /* ---------------- utils ---------------- */
@@ -404,8 +537,8 @@ function updateSummary(){
 }
 function dayRangeForTimeline(){
   if(tlMode==="week"){
-    const today = dayStart(Date.now());
-    return {start:today-6*86400000, end:today+86400000};
+    const endDay = Math.min(tlDate, dayStart(Date.now()));
+    return {start:endDay-6*86400000, end:endDay+86400000};
   }
   return {start:tlDate, end:tlDate+86400000};
 }
@@ -778,9 +911,30 @@ function renderRec(m){
 }
 
 /* ---- タイムラインタブ ---- */
-function setTlMode(mode){ tlMode=mode; render(); }
-function shiftDay(n){ tlDate += n*86400000; render(); }
+function clampTlDate(){
+  const today = dayStart(Date.now());
+  if(tlDate > today) tlDate = today;
+}
+function setTlMode(mode){ tlMode=mode; clampTlDate(); render(); }
+function shiftDay(n){ tlDate += n*86400000; clampTlDate(); render(); }
+function shiftTlWeek(n){ tlDate += n*7*86400000; clampTlDate(); render(); }
+function setTlDate(value){
+  const t = new Date(value + "T00:00:00").getTime();
+  if(isNaN(t)){ toast("日付が不正です"); return; }
+  tlDate = dayStart(t);
+  clampTlDate();
+  render();
+}
+function tlWeekDays(){
+  const days=[]; for(let i=6;i>=0;i--) days.push(tlDate - i*86400000);
+  return days;
+}
+function tlWeekLabel(today){
+  const start = tlDate - 6*86400000;
+  return `${fmtDateJ(start)} 〜 ${fmtDateJ(tlDate)}${tlDate===today?" (今日まで)":""}`;
+}
 function renderTL(m){
+  clampTlDate();
   m.innerHTML = `<div class="seg">
     <button class="${tlMode==='day'?'on':''}" onclick="setTlMode('day')">日</button>
     <button class="${tlMode==='week'?'on':''}" onclick="setTlMode('week')">週</button>
@@ -851,8 +1005,18 @@ function renderTLDay(){
 }
 function renderTLWeek(){
   const today = dayStart(Date.now());
-  const days=[]; for(let i=6;i>=0;i--) days.push(today - i*86400000);
-  return `<div class="week-grid">` + days.map(day=>{
+  const days = tlWeekDays();
+  const atToday = tlDate >= today;
+  return `
+    <div class="day-nav">
+      <button onclick="shiftTlWeek(-1)">‹</button>
+      <div class="date-center">
+        <b>${tlWeekLabel(today)}</b>
+        <input type="date" value="${fmtYMD(tlDate)}" max="${fmtYMD(today)}" onchange="setTlDate(this.value)">
+      </div>
+      <button onclick="shiftTlWeek(1)" ${atToday?"disabled style='opacity:.3'":""}>›</button>
+    </div>
+    <div class="week-grid">` + days.map(day=>{
     const total = Object.values(totalsOfDay(day)).reduce((a,b)=>a+b,0);
     const cal = eventsOfDay(day).length ? `<div class="week-cal">${calendarBlocks(day,true)}</div>` : "";
     return `<div class="week-day" onclick="tlDate=${day};tlMode='day';render()">
@@ -920,26 +1084,71 @@ function saveNote(id){
 }
 
 /* ---- 分析タブ ---- */
+function setAnaMode(mode){ anaMode=mode; clampAnaDate(); render(); }
+function clampAnaDate(){
+  const today = dayStart(Date.now());
+  if(anaDate > today) anaDate = today;
+}
+function anaStepDays(){
+  if(anaMode==="week") return 7;
+  if(anaMode==="rhythm") return 14;
+  return 1;
+}
+function shiftAnaPeriod(n){
+  clampAnaDate();
+  anaDate += n * anaStepDays() * 86400000;
+  clampAnaDate();
+  render();
+}
+function setAnaDate(value){
+  const t = new Date(value + "T00:00:00").getTime();
+  if(isNaN(t)){ toast("日付が不正です"); return; }
+  anaDate = dayStart(t);
+  clampAnaDate();
+  render();
+}
+function anaDays(count){
+  const days = [];
+  for(let i=count-1;i>=0;i--) days.push(anaDate - i*86400000);
+  return days;
+}
+function anaPeriodLabel(today){
+  if(anaMode==="day") return `${fmtDateJ(anaDate)}${anaDate===today?" (今日)":""}`;
+  const span = anaMode==="week" ? 7 : 14;
+  const start = anaDate - (span - 1) * 86400000;
+  return `${fmtDateJ(start)} 〜 ${fmtDateJ(anaDate)}${anaDate===today?"":""}`;
+}
+function anaNavHtml(today){
+  const atToday = anaDate >= today;
+  return `<div class="day-nav ana-nav">
+    <button onclick="shiftAnaPeriod(-1)">‹</button>
+    <div class="date-center">
+      <b>${anaPeriodLabel(today)}</b>
+      <input type="date" value="${fmtYMD(anaDate)}" max="${fmtYMD(today)}" onchange="setAnaDate(this.value)">
+    </div>
+    <button onclick="shiftAnaPeriod(1)" ${atToday?"disabled style='opacity:.3'":""}>›</button>
+  </div>`;
+}
 function renderAna(m){
   const today = dayStart(Date.now());
+  clampAnaDate();
   let html = `<div class="seg">
-    <button class="${anaMode==='day'?'on':''}" onclick="anaMode='day';render()">今日</button>
-    <button class="${anaMode==='week'?'on':''}" onclick="anaMode='week';render()">直近7日</button>
-    <button class="${anaMode==='rhythm'?'on':''}" onclick="anaMode='rhythm';render()">リズム</button>
-  </div>`;
+    <button class="${anaMode==='day'?'on':''}" onclick="setAnaMode('day')">日別</button>
+    <button class="${anaMode==='week'?'on':''}" onclick="setAnaMode('week')">7日間</button>
+    <button class="${anaMode==='rhythm'?'on':''}" onclick="setAnaMode('rhythm')">リズム</button>
+  </div>` + anaNavHtml(today);
 
   if(anaMode==="day"){
-    const totals = totalsOfDay(today);
+    const totals = totalsOfDay(anaDate);
     const sum = Object.values(totals).reduce((a,b)=>a+b,0);
-    const recorded = sum, elapsed = Date.now()-today;
+    const recorded = sum, elapsed = anaDate===today ? Date.now()-today : 86400000;
     html += `<div class="kpi-grid">
       <div class="kpi"><div class="k-lbl">記録済み時間</div><div class="k-val">${fmtDur(recorded)||"0分"}</div></div>
       <div class="kpi"><div class="k-lbl">記録カバー率</div><div class="k-val">${elapsed?Math.round(recorded/elapsed*100):0}%</div></div>
-    </div>` + healthKpisHtml([today]);
+    </div>` + healthKpisHtml([anaDate]);
     html += `<div class="card">` + breakdownRows(totals, sum) + `</div>`;
   }else if(anaMode==="week"){
-    // 直近7日
-    const days=[]; for(let i=6;i>=0;i--) days.push(today - i*86400000);
+    const days = anaDays(7);
     const perDay = days.map(d=>totalsOfDay(d));
     const weekTotal = {};
     perDay.forEach(t=>{ for(const k in t) weekTotal[k]=(weekTotal[k]||0)+t[k]; });
@@ -964,7 +1173,7 @@ function renderAna(m){
 
     html += `<div class="card">` + breakdownRows(weekTotal, wSum) + `</div>`;
   }else{
-    html += renderRhythm(today);
+    html += renderRhythm(anaDate);
   }
   m.innerHTML = html;
 }
@@ -1235,7 +1444,7 @@ function renderSet(m){
     <input id="jsonImport" type="file" accept="application/json,.json" style="display:none" onchange="importJsonFile(this)">
     <button class="btn danger" onclick="clearAll()">全データを削除</button>
     <p style="font-size:11.5px;color:var(--sub);margin-top:14px">
-      記録件数: ${state.entries.length} 件。健康記録: ${state.logs.length} 件。データはこのアプリ内のストレージに保存されます。
+      記録件数: ${state.entries.length} 件。健康記録: ${state.logs.length} 件。データはこの端末のブラウザ内ストレージに保存されます。
     </p>`;
 }
 function summarySelect(key){
@@ -1310,10 +1519,10 @@ function exportSuffix(opts){
 }
 function exportState(opts){
   const out = {
-    categories: structuredClone(state.categories),
-    entries: opts.activity ? structuredClone(state.entries) : [],
-    logs: opts.health ? structuredClone(state.logs) : [],
-    settings: structuredClone(state.settings || {})
+    categories: cloneData(state.categories),
+    entries: opts.activity ? cloneData(state.entries) : [],
+    logs: opts.health ? cloneData(state.logs) : [],
+    settings: cloneData(state.settings || {})
   };
   return out;
 }
@@ -1437,7 +1646,13 @@ function downloadBlob(content, filename, type){
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
-  a.click(); URL.revokeObjectURL(a.href);
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 1000);
 }
 function importJsonFile(input){
   const file = input.files?.[0];
@@ -1461,7 +1676,7 @@ function importJsonFile(input){
 }
 function clearAll(){
   if(!confirm("全ての記録とカテゴリ設定を削除します。よろしいですか?")) return;
-  state = { categories: structuredClone(DEFAULT_CATS), entries: [], logs: [], settings: {...DEFAULT_SETTINGS} };
+  state = { categories: cloneData(DEFAULT_CATS), entries: [], logs: [], settings: {...DEFAULT_SETTINGS} };
   googleToken = null; googleTokenExpiresAt = 0; googleTokenClient = null; calendarEvents = []; calendarRange = null;
   save(); render(); toast("初期化しました");
 }
@@ -1504,6 +1719,8 @@ function runToastAction(){
 
 /* ---- boot ---- */
 (async ()=>{ await load(); render(); })();
+window.addEventListener("pagehide", flushSave);
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") flushSave(); });
 if("serviceWorker" in navigator){
   window.addEventListener("load", ()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 }
