@@ -1,4 +1,4 @@
-const CACHE = "otona-log-v7";
+const CACHE = "otona-log-v8";
 const APP_SHELL = "./index.html";
 const ASSETS = [
   "./",
