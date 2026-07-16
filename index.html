@@ -218,6 +218,13 @@ const DB_NAME = "otona_log_device_db";
 const DB_STORE = "state";
 const DB_STATE_KEY = "current";
 const PALETTE = ["#7C8DB5","#5B9E8F","#C98A5E","#8B7BB5","#9AA65C","#D98F9C","#6FA8C9","#D9A441","#A8A29B","#7BA37B","#B56A6A","#5E8CC9"];
+const FIREBASE_SDK_VERSION = "12.16.0";
+const FIREBASE_CONFIG = {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  appId: ""
+};
 
 const DEFAULT_CATS = [
   {id:"sleep", name:"睡眠",     emoji:"😴", color:"#7C8DB5"},
@@ -257,6 +264,15 @@ let googleTokenClient = null;
 let calendarEvents = [];
 let calendarRange = null;
 let calendarLoading = false;
+let firebaseModules = null;
+let cloudAuth = null;
+let cloudDb = null;
+let cloudUser = null;
+let cloudReady = false;
+let cloudBusy = false;
+let cloudSaveTimer = null;
+let cloudUnsubscribe = null;
+let cloudApplying = false;
 
 /* ---------------- storage (device local IndexedDB + localStorage fallback) ---------------- */
 async function load(){
@@ -409,6 +425,10 @@ function save(){
   }, 400);
 }
 function persistState(opts={}){
+  if(!opts.noTouch){
+    state.settings = state.settings || {};
+    state.settings.updatedAt = Date.now();
+  }
   let localOk = true;
   try{
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -419,6 +439,7 @@ function persistState(opts={}){
     console.warn("device storage save failed", e);
     if(!opts.silent) toast(localOk ? "端末内DBへの保存に失敗しました" : "保存に失敗しました");
   });
+  if(!opts.skipCloud && cloudUser && !cloudApplying) scheduleCloudSave();
   if(!localOk && !opts.silent) toast("保存に失敗しました");
   return localOk;
 }
@@ -428,6 +449,179 @@ function flushSave(){
     saveTimer = null;
     persistState();
   }
+}
+
+/* ---------------- cloud sync (Firebase Auth + Firestore) ---------------- */
+function firebaseConfigured(){
+  return ["apiKey","authDomain","projectId","appId"].every(k=>String(FIREBASE_CONFIG[k] || "").trim());
+}
+async function loadFirebaseModules(){
+  if(firebaseModules) return firebaseModules;
+  const base = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}`;
+  const [app, auth, firestore] = await Promise.all([
+    import(`${base}/firebase-app.js`),
+    import(`${base}/firebase-auth.js`),
+    import(`${base}/firebase-firestore.js`)
+  ]);
+  firebaseModules = {app, auth, firestore};
+  return firebaseModules;
+}
+async function initCloud(opts={}){
+  if(!firebaseConfigured()){
+    if(!opts.silent) toast("Firebase設定が未設定です");
+    return false;
+  }
+  if(cloudReady) return true;
+  try{
+    const mods = await loadFirebaseModules();
+    const app = mods.app.getApps().length ? mods.app.getApps()[0] : mods.app.initializeApp(FIREBASE_CONFIG);
+    cloudAuth = mods.auth.getAuth(app);
+    cloudAuth.useDeviceLanguage?.();
+    cloudDb = mods.firestore.getFirestore(app);
+    mods.auth.onAuthStateChanged(cloudAuth, async user=>{
+      cloudUser = user || null;
+      if(user){
+        await syncCloudOnLogin();
+        subscribeCloud();
+      }else{
+        if(cloudUnsubscribe){ cloudUnsubscribe(); cloudUnsubscribe = null; }
+      }
+      if(tab==="set") render();
+    });
+    cloudReady = true;
+    return true;
+  }catch(e){
+    console.warn("cloud init failed", e);
+    if(!opts.silent) toast("ログイン機能を初期化できませんでした");
+    return false;
+  }
+}
+function cloudDocRef(){
+  if(!cloudUser || !cloudDb || !firebaseModules) return null;
+  return firebaseModules.firestore.doc(cloudDb, "users", cloudUser.uid, "otonaLog", "state");
+}
+function localUpdatedAt(){ return Number(state.settings?.updatedAt || 0); }
+function cloudPayload(){
+  const data = exportState({activity:true, health:true});
+  data.settings = data.settings || {};
+  data.settings.updatedAt = data.settings.updatedAt || Date.now();
+  return {data, updatedAt:Number(data.settings.updatedAt || Date.now()), schema:"otona_log_v1"};
+}
+function scheduleCloudSave(){
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(()=>saveCloudState(), 900);
+}
+async function saveCloudState(){
+  const ref = cloudDocRef();
+  if(!ref || cloudBusy) return;
+  cloudBusy = true;
+  try{
+    await writeCloudState();
+    if(tab==="set") render();
+  }catch(e){
+    console.warn("cloud save failed", e);
+    toast("クラウド同期に失敗しました");
+  }finally{
+    cloudBusy = false;
+  }
+}
+async function writeCloudState(){
+  const ref = cloudDocRef();
+  if(!ref) return;
+  await firebaseModules.firestore.setDoc(ref, cloudPayload(), {merge:true});
+}
+function applyCloudState(data){
+  cloudApplying = true;
+  state = normalizeState(data);
+  persistState({silent:true, skipCloud:true, noTouch:true});
+  cloudApplying = false;
+  render();
+}
+function remotePayloadFromSnap(snap){
+  if(!snap?.exists?.()) return null;
+  const payload = snap.data();
+  return payload?.data ? payload : null;
+}
+async function syncCloudOnLogin(){
+  const ref = cloudDocRef();
+  if(!ref || cloudBusy) return;
+  cloudBusy = true;
+  try{
+    const snap = await firebaseModules.firestore.getDoc(ref);
+    const remote = remotePayloadFromSnap(snap);
+    if(!remote){
+      await writeCloudState();
+      toast("この端末のデータをクラウドに保存しました");
+      return;
+    }
+    const remoteState = normalizeState(remote.data);
+    const remoteAt = Number(remote.updatedAt || remoteState.settings?.updatedAt || 0);
+    const localAt = localUpdatedAt();
+    const localHasData = state.entries.length || state.logs.length;
+    if(!localHasData || remoteAt > localAt){
+      const loadRemote = !localHasData || confirm("クラウドのデータがこの端末より新しいです。この端末に読み込みますか?\nキャンセルすると、この端末のデータでクラウドを上書きします。");
+      if(loadRemote){
+        applyCloudState(remoteState);
+        toast("クラウドのデータを読み込みました");
+      }else{
+        await writeCloudState();
+      }
+    }else if(localAt > remoteAt){
+      const uploadLocal = confirm("この端末のデータがクラウドより新しいです。クラウドへ保存しますか?\nキャンセルすると、クラウドのデータをこの端末に読み込みます。");
+      if(uploadLocal) await writeCloudState();
+      else{
+        applyCloudState(remoteState);
+        toast("クラウドのデータを読み込みました");
+      }
+    }
+  }catch(e){
+    console.warn("cloud sync failed", e);
+    toast("クラウド同期に失敗しました");
+  }finally{
+    cloudBusy = false;
+  }
+}
+function subscribeCloud(){
+  const ref = cloudDocRef();
+  if(!ref || cloudUnsubscribe) return;
+  cloudUnsubscribe = firebaseModules.firestore.onSnapshot(ref, snap=>{
+    const remote = remotePayloadFromSnap(snap);
+    if(!remote || cloudApplying || cloudBusy) return;
+    const remoteState = normalizeState(remote.data);
+    const remoteAt = Number(remote.updatedAt || remoteState.settings?.updatedAt || 0);
+    if(remoteAt > localUpdatedAt()){
+      applyCloudState(remoteState);
+      toast("別端末の更新を反映しました");
+    }
+  }, e=>console.warn("cloud watch failed", e));
+}
+async function loginCloud(){
+  if(!(await initCloud())) return;
+  try{
+    const provider = new firebaseModules.auth.GoogleAuthProvider();
+    await firebaseModules.auth.signInWithPopup(cloudAuth, provider);
+  }catch(e){
+    console.warn("popup login failed", e);
+    try{
+      const provider = new firebaseModules.auth.GoogleAuthProvider();
+      await firebaseModules.auth.signInWithRedirect(cloudAuth, provider);
+    }catch(err){
+      console.warn("redirect login failed", err);
+      toast("ログインを開始できませんでした");
+    }
+  }
+}
+async function logoutCloud(){
+  if(!cloudAuth && !(await initCloud({silent:true}))) return;
+  await firebaseModules.auth.signOut(cloudAuth);
+  cloudUser = null;
+  if(cloudUnsubscribe){ cloudUnsubscribe(); cloudUnsubscribe = null; }
+  render(); toast("ログアウトしました");
+}
+async function syncCloudNow(){
+  if(!cloudUser){ toast("ログインしてください"); return; }
+  await saveCloudState();
+  toast("クラウドへ同期しました");
 }
 
 /* ---------------- utils ---------------- */
@@ -1408,6 +1602,25 @@ function points(pts, color){
 }
 
 /* ---- 設定タブ ---- */
+function cloudStatusHtml(){
+  if(!firebaseConfigured()){
+    return `<div class="sec-label">ログイン・同期</div>
+    <div class="card">
+      <p style="font-size:12.5px;color:var(--sub)">状態: Firebase未設定。index.html の FIREBASE_CONFIG を設定すると、Googleログインとクラウド同期を使えます。</p>
+    </div>`;
+  }
+  const userText = cloudUser ? `${esc(cloudUser.displayName || cloudUser.email || "ログイン中")}` : "未ログイン";
+  return `<div class="sec-label">ログイン・同期</div>
+    <div class="card">
+      <p style="font-size:12.5px;color:var(--sub);margin-bottom:10px">状態: ${userText}${cloudBusy ? " / 同期中" : ""}</p>
+      ${cloudUser
+        ? `<div class="modal-acts">
+            <button class="btn" style="flex:1" onclick="syncCloudNow()">今すぐ同期</button>
+            <button class="btn ghost" style="flex:1" onclick="logoutCloud()">ログアウト</button>
+          </div>`
+        : `<button class="btn" onclick="loginCloud()">Googleでログイン</button>`}
+    </div>`;
+}
 function renderSet(m){
   m.innerHTML = `
     <div class="sec-label">カテゴリ</div>
@@ -1425,6 +1638,7 @@ function renderSet(m){
       <div class="fld"><label>睡眠として扱うカテゴリ</label>${summarySelect("sleepCatId")}</div>
       <div class="fld" style="margin-bottom:0"><label>休憩として扱うカテゴリ</label>${summarySelect("restCatId")}</div>
     </div>
+    ${cloudStatusHtml()}
     <div class="sec-label">Googleカレンダー連携</div>
     <div class="card">
       <div class="fld"><label>OAuthクライアントID</label><input id="googleClientId" value="${esc(state.settings.googleClientId || "")}" placeholder="xxxxx.apps.googleusercontent.com" oninput="saveGoogleClientId(this.value)"></div>
@@ -1718,7 +1932,11 @@ function runToastAction(){
 }
 
 /* ---- boot ---- */
-(async ()=>{ await load(); render(); })();
+(async ()=>{
+  await load();
+  render();
+  if(firebaseConfigured()) initCloud({silent:true});
+})();
 window.addEventListener("pagehide", flushSave);
 document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") flushSave(); });
 if("serviceWorker" in navigator){
